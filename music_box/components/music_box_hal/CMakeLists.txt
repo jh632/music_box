@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "src/hal_gpio.c"
+        "src/hal_i2c.c"
+        "src/hal_i2s.c"
+        "src/hal_rmt.c"
+        "src/hal_timer.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_driver_gpio
+        esp_driver_i2c
+        esp_driver_i2s
+        esp_driver_rmt
+        esp_timer
+)
