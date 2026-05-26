@@ -1,8 +1,3 @@
-/**
- * @file hal_rmt.h
- * @brief HAL 层 RMT TX 封装接口
- */
-
 #pragma once
 
 #include <stdbool.h>
@@ -47,20 +42,6 @@ esp_err_t hal_rmt_tx_transmit(hal_rmt_tx_handle_t h,
                               size_t len,
                               int loop_count);
 esp_err_t hal_rmt_tx_wait_done(hal_rmt_tx_handle_t h, int timeout_ms);
-
-/**
- * @brief RMT HAL 函数表
- */
-typedef struct {
-    esp_err_t (*tx_init)(const hal_rmt_tx_config_t *cfg, hal_rmt_tx_handle_t *out);
-    esp_err_t (*tx_deinit)(hal_rmt_tx_handle_t h);
-    esp_err_t (*tx_enable)(hal_rmt_tx_handle_t h);
-    esp_err_t (*tx_disable)(hal_rmt_tx_handle_t h);
-    esp_err_t (*tx_transmit)(hal_rmt_tx_handle_t h, const void *data, size_t len, int loop_count);
-    esp_err_t (*tx_wait_done)(hal_rmt_tx_handle_t h, int timeout_ms);
-} hal_rmt_ops_t;
-
-const hal_rmt_ops_t *hal_rmt_get_ops(void);
 
 #ifdef __cplusplus
 }

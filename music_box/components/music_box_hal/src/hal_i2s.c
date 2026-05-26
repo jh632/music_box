@@ -1,15 +1,11 @@
-/*
- * hal_i2s.c — HAL 层 I2S standard TX 封装实现
- */
-
 #include "hal_i2s.h"
+
+#include "esp_log.h"
 
 static const char *TAG = "HAL_I2S";
 
-struct hal_i2s_s {
-    i2s_chan_handle_t tx_chan;
-    bool enabled;
-};
+static i2s_chan_handle_t s_tx_chan;
+static bool s_enabled;
 
 static esp_err_t s_make_slot_config(const hal_i2s_config_t *cfg,
                                     i2s_std_slot_config_t *slot_cfg)
@@ -36,17 +32,15 @@ static esp_err_t s_make_slot_config(const hal_i2s_config_t *cfg,
     return ESP_OK;
 }
 
-esp_err_t hal_i2s_init(const hal_i2s_config_t *cfg, hal_i2s_handle_t *out)
+esp_err_t hal_i2s_init(const hal_i2s_config_t *cfg)
 {
-    if (cfg == NULL || out == NULL || cfg->sample_rate_hz == 0) {
+    if (cfg == NULL || cfg->sample_rate_hz == 0) {
         ESP_LOGE(TAG, "invalid init arg");
         return ESP_ERR_INVALID_ARG;
     }
-
-    hal_i2s_handle_t h = calloc(1, sizeof(*h));
-    if (h == NULL) {
-        ESP_LOGE(TAG, "OOM");
-        return ESP_ERR_NO_MEM;
+    if (s_tx_chan != NULL) {
+        ESP_LOGE(TAG, "I2S already initialized");
+        return ESP_ERR_INVALID_STATE;
     }
 
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(cfg->port, I2S_ROLE_MASTER);
@@ -57,18 +51,17 @@ esp_err_t hal_i2s_init(const hal_i2s_config_t *cfg, hal_i2s_handle_t *out)
         chan_cfg.dma_frame_num = cfg->dma_frame_num;
     }
 
-    esp_err_t ret = i2s_new_channel(&chan_cfg, &h->tx_chan, NULL);
+    i2s_chan_handle_t tx_chan = NULL;
+    esp_err_t ret = i2s_new_channel(&chan_cfg, &tx_chan, NULL);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "new channel failed: %s", esp_err_to_name(ret));
-        free(h);
         return ret;
     }
 
     i2s_std_slot_config_t slot_cfg = {0};
     ret = s_make_slot_config(cfg, &slot_cfg);
     if (ret != ESP_OK) {
-        i2s_del_channel(h->tx_chan);
-        free(h);
+        i2s_del_channel(tx_chan);
         return ret;
     }
 
@@ -89,123 +82,107 @@ esp_err_t hal_i2s_init(const hal_i2s_config_t *cfg, hal_i2s_handle_t *out)
         },
     };
 
-    ret = i2s_channel_init_std_mode(h->tx_chan, &std_cfg);
+    ret = i2s_channel_init_std_mode(tx_chan, &std_cfg);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "init std mode failed: %s", esp_err_to_name(ret));
-        i2s_del_channel(h->tx_chan);
-        free(h);
+        i2s_del_channel(tx_chan);
         return ret;
     }
 
-    *out = h;
+    s_tx_chan = tx_chan;
+    s_enabled = false;
     return ESP_OK;
 }
 
-esp_err_t hal_i2s_deinit(hal_i2s_handle_t h)
+esp_err_t hal_i2s_deinit(void)
 {
-    if (h == NULL) {
-        ESP_LOGE(TAG, "handle is NULL");
-        return ESP_ERR_INVALID_ARG;
+    if (s_tx_chan == NULL) {
+        ESP_LOGE(TAG, "I2S is not initialized");
+        return ESP_ERR_INVALID_STATE;
     }
 
-    if (h->enabled) {
-        esp_err_t ret = i2s_channel_disable(h->tx_chan);
+    if (s_enabled) {
+        esp_err_t ret = i2s_channel_disable(s_tx_chan);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "disable before deinit failed: %s", esp_err_to_name(ret));
             return ret;
         }
-        h->enabled = false;
+        s_enabled = false;
     }
 
-    esp_err_t ret = i2s_del_channel(h->tx_chan);
+    esp_err_t ret = i2s_del_channel(s_tx_chan);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "delete channel failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    free(h);
+    s_tx_chan = NULL;
     return ESP_OK;
 }
 
-esp_err_t hal_i2s_enable(hal_i2s_handle_t h)
+esp_err_t hal_i2s_enable(void)
 {
-    if (h == NULL) {
-        ESP_LOGE(TAG, "handle is NULL");
-        return ESP_ERR_INVALID_ARG;
+    if (s_tx_chan == NULL) {
+        ESP_LOGE(TAG, "I2S is not initialized");
+        return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret = i2s_channel_enable(h->tx_chan);
+    esp_err_t ret = i2s_channel_enable(s_tx_chan);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "enable failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    h->enabled = true;
+    s_enabled = true;
     return ESP_OK;
 }
 
-esp_err_t hal_i2s_disable(hal_i2s_handle_t h)
+esp_err_t hal_i2s_disable(void)
 {
-    if (h == NULL) {
-        ESP_LOGE(TAG, "handle is NULL");
-        return ESP_ERR_INVALID_ARG;
+    if (s_tx_chan == NULL) {
+        ESP_LOGE(TAG, "I2S is not initialized");
+        return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret = i2s_channel_disable(h->tx_chan);
+    esp_err_t ret = i2s_channel_disable(s_tx_chan);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "disable failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    h->enabled = false;
+    s_enabled = false;
     return ESP_OK;
 }
 
-esp_err_t hal_i2s_write(hal_i2s_handle_t h,
-                        const void *data,
+esp_err_t hal_i2s_write(const void *data,
                         size_t size,
                         size_t *bytes_written,
                         uint32_t timeout_ms)
 {
-    if (h == NULL || (data == NULL && size > 0)) {
+    if (s_tx_chan == NULL || (data == NULL && size > 0)) {
         ESP_LOGE(TAG, "invalid write arg");
         return ESP_ERR_INVALID_ARG;
     }
 
-    esp_err_t ret = i2s_channel_write(h->tx_chan, data, size, bytes_written, timeout_ms);
+    esp_err_t ret = i2s_channel_write(s_tx_chan, data, size, bytes_written, timeout_ms);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "write failed: %s", esp_err_to_name(ret));
     }
     return ret;
 }
 
-esp_err_t hal_i2s_preload(hal_i2s_handle_t h,
-                          const void *data,
+esp_err_t hal_i2s_preload(const void *data,
                           size_t size,
                           size_t *bytes_loaded)
 {
-    if (h == NULL || (data == NULL && size > 0)) {
+    if (s_tx_chan == NULL || (data == NULL && size > 0)) {
         ESP_LOGE(TAG, "invalid preload arg");
         return ESP_ERR_INVALID_ARG;
     }
 
-    esp_err_t ret = i2s_channel_preload_data(h->tx_chan, data, size, bytes_loaded);
+    esp_err_t ret = i2s_channel_preload_data(s_tx_chan, data, size, bytes_loaded);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "preload failed: %s", esp_err_to_name(ret));
     }
     return ret;
-}
-
-static const hal_i2s_ops_t s_hal_i2s_ops = {
-    .init = hal_i2s_init,
-    .deinit = hal_i2s_deinit,
-    .enable = hal_i2s_enable,
-    .disable = hal_i2s_disable,
-    .write = hal_i2s_write,
-    .preload = hal_i2s_preload,
-};
-
-const hal_i2s_ops_t *hal_i2s_get_ops(void)
-{
-    return &s_hal_i2s_ops;
 }

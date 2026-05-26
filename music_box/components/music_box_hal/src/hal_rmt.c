@@ -1,7 +1,3 @@
-/*
- * hal_rmt.c — HAL 层 RMT TX 封装实现
- */
-
 #include "hal_rmt.h"
 
 static const char *TAG = "HAL_RMT";
@@ -224,18 +220,4 @@ esp_err_t hal_rmt_tx_wait_done(hal_rmt_tx_handle_t h, int timeout_ms)
         ESP_LOGE(TAG, "wait done failed: %s", esp_err_to_name(ret));
     }
     return ret;
-}
-
-static const hal_rmt_ops_t s_hal_rmt_ops = {
-    .tx_init = hal_rmt_tx_init,
-    .tx_deinit = hal_rmt_tx_deinit,
-    .tx_enable = hal_rmt_tx_enable,
-    .tx_disable = hal_rmt_tx_disable,
-    .tx_transmit = hal_rmt_tx_transmit,
-    .tx_wait_done = hal_rmt_tx_wait_done,
-};
-
-const hal_rmt_ops_t *hal_rmt_get_ops(void)
-{
-    return &s_hal_rmt_ops;
 }

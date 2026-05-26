@@ -1,7 +1,3 @@
-/*
- * hal_timer.c — HAL 层 esp_timer 封装实现
- */
-
 #include "hal_timer.h"
 
 static const char *TAG = "HAL_TIMER";
@@ -99,17 +95,4 @@ esp_err_t hal_timer_stop(hal_timer_handle_t h)
         ESP_LOGE(TAG, "stop failed: %s", esp_err_to_name(ret));
     }
     return ret;
-}
-
-static const hal_timer_ops_t s_hal_timer_ops = {
-    .create = hal_timer_create,
-    .del = hal_timer_delete,
-    .start_once = hal_timer_start_once,
-    .start_periodic = hal_timer_start_periodic,
-    .stop = hal_timer_stop,
-};
-
-const hal_timer_ops_t *hal_timer_get_ops(void)
-{
-    return &s_hal_timer_ops;
 }

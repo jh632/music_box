@@ -1,11 +1,3 @@
-/*
- * hal_gpio.c — HAL 层 GPIO 封装实现
- *
- * 职责：
- *   封装 ESP-IDF driver/gpio.h，对上层屏蔽底层细节。
- *   所有内部函数均为 static，只通过 hal_gpio.h 暴露接口。
- */
-
 #include "hal_gpio.h"
 
 static const char *TAG = "HAL_GPIO";
@@ -121,18 +113,4 @@ esp_err_t hal_gpio_isr_handler_remove(gpio_num_t pin)
         ESP_LOGE(TAG, "isr_handler_remove pin %d failed: %s", pin, esp_err_to_name(ret));
     }
     return ret;
-}
-
-static const hal_gpio_ops_t s_hal_gpio_ops = {
-    .init = hal_gpio_init,
-    .set_level = hal_gpio_set_level,
-    .get_level = hal_gpio_get_level,
-    .isr_service_install = hal_gpio_isr_service_install,
-    .isr_handler_add = hal_gpio_isr_handler_add,
-    .isr_handler_remove = hal_gpio_isr_handler_remove,
-};
-
-const hal_gpio_ops_t *hal_gpio_get_ops(void)
-{
-    return &s_hal_gpio_ops;
 }
