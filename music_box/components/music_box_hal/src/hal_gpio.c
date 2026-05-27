@@ -1,8 +1,27 @@
 #include "hal_gpio.h"
-
 #include "esp_log.h"
 
 static const char *TAG = "HAL_GPIO";
+
+static gpio_int_type_t s_map_intr_type(hal_gpio_intr_type_t intr_type)
+{
+    switch (intr_type) {
+    case HAL_GPIO_INTR_DISABLE:
+        return GPIO_INTR_DISABLE;
+    case HAL_GPIO_INTR_POSEDGE:
+        return GPIO_INTR_POSEDGE;
+    case HAL_GPIO_INTR_NEGEDGE:
+        return GPIO_INTR_NEGEDGE;
+    case HAL_GPIO_INTR_ANYEDGE:
+        return GPIO_INTR_ANYEDGE;
+    case HAL_GPIO_INTR_LOW_LEVEL:
+        return GPIO_INTR_LOW_LEVEL;
+    case HAL_GPIO_INTR_HIGH_LEVEL:
+        return GPIO_INTR_HIGH_LEVEL;
+    default:
+        return GPIO_INTR_DISABLE;
+    }
+}
 
 static esp_err_t s_apply_config(const hal_gpio_config_t *cfg)
 {
@@ -25,7 +44,7 @@ static esp_err_t s_apply_config(const hal_gpio_config_t *cfg)
 
     case HAL_GPIO_DIR_INPUT_INTR:
         io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.intr_type = (gpio_int_type_t)cfg->intr_type;
+        io_conf.intr_type = s_map_intr_type(cfg->intr_type);
         break;
 
     default:
