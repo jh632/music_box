@@ -1,7 +1,3 @@
-/*
- * hal_i2c.c - HAL 层 I2C master 封装实现
- */
-
 #include "hal_i2c.h"
 
 #include <stdlib.h>
@@ -13,7 +9,7 @@ static const char *TAG = "HAL_I2C";
 static i2c_master_bus_handle_t s_bus;
 static i2c_master_dev_handle_t s_dev;
 
-esp_err_t hal_i2c_bus_init(const hal_i2c_bus_config_t *cfg)
+static esp_err_t s_hal_i2c_bus_init(const hal_i2c_bus_config_t *cfg)
 {
     if (cfg == NULL) {
         ESP_LOGE(TAG, "cfg is NULL");
@@ -42,7 +38,24 @@ esp_err_t hal_i2c_bus_init(const hal_i2c_bus_config_t *cfg)
     return ret;
 }
 
-esp_err_t hal_i2c_bus_deinit(void)
+static esp_err_t s_hal_i2c_device_deinit(void)
+{
+    if (s_dev == NULL) {
+        ESP_LOGE(TAG, "device is not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t ret = i2c_master_bus_rm_device(s_dev);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "remove device failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    s_dev = NULL;
+    return ESP_OK;
+}
+
+static esp_err_t s_hal_i2c_bus_deinit(void)
 {
     if (s_bus == NULL) {
         ESP_LOGE(TAG, "bus is not initialized");
@@ -50,7 +63,7 @@ esp_err_t hal_i2c_bus_deinit(void)
     }
 
     if (s_dev != NULL) {
-        esp_err_t ret = hal_i2c_device_deinit();
+        esp_err_t ret = s_hal_i2c_device_deinit();
         if (ret != ESP_OK) {
             return ret;
         }
@@ -66,7 +79,7 @@ esp_err_t hal_i2c_bus_deinit(void)
     return ESP_OK;
 }
 
-esp_err_t hal_i2c_device_init(const hal_i2c_dev_config_t *cfg)
+static esp_err_t s_hal_i2c_device_init(const hal_i2c_dev_config_t *cfg)
 {
     if (cfg == NULL) {
         ESP_LOGE(TAG, "cfg is NULL");
@@ -96,24 +109,7 @@ esp_err_t hal_i2c_device_init(const hal_i2c_dev_config_t *cfg)
     return ret;
 }
 
-esp_err_t hal_i2c_device_deinit(void)
-{
-    if (s_dev == NULL) {
-        ESP_LOGE(TAG, "device is not initialized");
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    esp_err_t ret = i2c_master_bus_rm_device(s_dev);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "remove device failed: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    s_dev = NULL;
-    return ESP_OK;
-}
-
-esp_err_t hal_i2c_transmit(const uint8_t *data, size_t len, int timeout_ms)
+static esp_err_t s_hal_i2c_transmit(const uint8_t *data, size_t len, int timeout_ms)
 {
     if (s_dev == NULL || (data == NULL && len > 0)) {
         ESP_LOGE(TAG, "invalid transmit arg");
@@ -127,11 +123,11 @@ esp_err_t hal_i2c_transmit(const uint8_t *data, size_t len, int timeout_ms)
     return ret;
 }
 
-esp_err_t hal_i2c_transmit_receive(const uint8_t *write_data,
-                                   size_t write_len,
-                                   uint8_t *read_data,
-                                   size_t read_len,
-                                   int timeout_ms)
+static esp_err_t s_hal_i2c_transmit_receive(const uint8_t *write_data,
+                                            size_t write_len,
+                                            uint8_t *read_data,
+                                            size_t read_len,
+                                            int timeout_ms)
 {
     if (s_dev == NULL ||
         (write_data == NULL && write_len > 0) ||
@@ -152,22 +148,22 @@ esp_err_t hal_i2c_transmit_receive(const uint8_t *write_data,
     return ret;
 }
 
-esp_err_t hal_i2c_read_reg(uint8_t reg_addr,
-                           uint8_t *data,
-                           size_t len,
-                           int timeout_ms)
+static esp_err_t s_hal_i2c_read_reg(uint8_t reg_addr,
+                                    uint8_t *data,
+                                    size_t len,
+                                    int timeout_ms)
 {
     if (data == NULL && len > 0) {
         ESP_LOGE(TAG, "invalid read_reg arg");
         return ESP_ERR_INVALID_ARG;
     }
-    return hal_i2c_transmit_receive(&reg_addr, sizeof(reg_addr), data, len, timeout_ms);
+    return s_hal_i2c_transmit_receive(&reg_addr, sizeof(reg_addr), data, len, timeout_ms);
 }
 
-esp_err_t hal_i2c_write_reg(uint8_t reg_addr,
-                            const uint8_t *data,
-                            size_t len,
-                            int timeout_ms)
+static esp_err_t s_hal_i2c_write_reg(uint8_t reg_addr,
+                                     const uint8_t *data,
+                                     size_t len,
+                                     int timeout_ms)
 {
     if (data == NULL && len > 0) {
         ESP_LOGE(TAG, "invalid write_reg arg");
@@ -185,7 +181,23 @@ esp_err_t hal_i2c_write_reg(uint8_t reg_addr,
         memcpy(&write_buf[1], data, len);
     }
 
-    esp_err_t ret = hal_i2c_transmit(write_buf, len + sizeof(reg_addr), timeout_ms);
+    esp_err_t ret = s_hal_i2c_transmit(write_buf, len + sizeof(reg_addr), timeout_ms);
     free(write_buf);
     return ret;
+}
+
+static const hal_i2c_ops_t s_hal_i2c_ops = {
+    .bus_init = s_hal_i2c_bus_init,
+    .bus_deinit = s_hal_i2c_bus_deinit,
+    .device_init = s_hal_i2c_device_init,
+    .device_deinit = s_hal_i2c_device_deinit,
+    .transmit = s_hal_i2c_transmit,
+    .transmit_receive = s_hal_i2c_transmit_receive,
+    .read_reg = s_hal_i2c_read_reg,
+    .write_reg = s_hal_i2c_write_reg,
+};
+
+const hal_i2c_ops_t *hal_i2c_get_ops(void)
+{
+    return &s_hal_i2c_ops;
 }

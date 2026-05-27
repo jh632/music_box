@@ -1,8 +1,14 @@
 #include "hal_rmt.h"
 
+#include <string.h>
+#include "driver/rmt_common.h"
+#include "driver/rmt_encoder.h"
+#include "driver/rmt_tx.h"
+#include "esp_log.h"
+
 static const char *TAG = "HAL_RMT";
 
-struct hal_rmt_tx_s {
+typedef struct {
     rmt_channel_handle_t channel;
     rmt_encoder_handle_t encoder;
     rmt_symbol_word_t bit0;
@@ -10,7 +16,10 @@ struct hal_rmt_tx_s {
     rmt_symbol_word_t reset;
     bool msb_first;
     bool enabled;
-};
+    bool inited;
+} hal_rmt_ctx_t;
+
+static hal_rmt_ctx_t s_rmt;
 
 static uint16_t s_ns_to_ticks(uint32_t ns, uint32_t resolution_hz)
 {
@@ -32,8 +41,8 @@ static size_t s_encode_byte_stream(const void *data,
                                    bool *done,
                                    void *arg)
 {
-    hal_rmt_tx_handle_t h = (hal_rmt_tx_handle_t)arg;
-    if (h == NULL || symbols_free < 8) {
+    hal_rmt_ctx_t *ctx = (hal_rmt_ctx_t *)arg;
+    if (ctx == NULL || symbols_free < 8) {
         return 0;
     }
 
@@ -42,53 +51,54 @@ static size_t s_encode_byte_stream(const void *data,
     if (data_pos < data_size) {
         uint8_t byte = bytes[data_pos];
         for (size_t i = 0; i < 8; i++) {
-            uint8_t bit_index = h->msb_first ? (7 - i) : i;
-            symbols[i] = (byte & (1U << bit_index)) ? h->bit1 : h->bit0;
+            uint8_t bit_index = ctx->msb_first ? (7 - i) : i;
+            symbols[i] = (byte & (1U << bit_index)) ? ctx->bit1 : ctx->bit0;
         }
         return 8;
     }
 
-    symbols[0] = h->reset;
+    symbols[0] = ctx->reset;
     *done = true;
     return 1;
 }
 
-esp_err_t hal_rmt_tx_init(const hal_rmt_tx_config_t *cfg, hal_rmt_tx_handle_t *out)
+static esp_err_t s_hal_rmt_tx_init(const hal_rmt_tx_config_t *cfg)
 {
-    if (cfg == NULL || out == NULL || cfg->resolution_hz == 0) {
+    if (cfg == NULL || cfg->resolution_hz == 0) {
         ESP_LOGE(TAG, "invalid tx init arg");
         return ESP_ERR_INVALID_ARG;
     }
-
-    hal_rmt_tx_handle_t h = calloc(1, sizeof(*h));
-    if (h == NULL) {
-        ESP_LOGE(TAG, "OOM");
-        return ESP_ERR_NO_MEM;
+    if (s_rmt.inited) {
+        ESP_LOGE(TAG, "RMT already initialized");
+        return ESP_ERR_INVALID_STATE;
     }
 
-    h->bit0 = (rmt_symbol_word_t) {
+    memset(&s_rmt, 0, sizeof(s_rmt));
+
+    s_rmt.bit0 = (rmt_symbol_word_t) {
         .level0 = 1,
         .duration0 = s_ns_to_ticks(cfg->bit0_high_ns, cfg->resolution_hz),
         .level1 = 0,
         .duration1 = s_ns_to_ticks(cfg->bit0_low_ns, cfg->resolution_hz),
     };
-    h->bit1 = (rmt_symbol_word_t) {
+    s_rmt.bit1 = (rmt_symbol_word_t) {
         .level0 = 1,
         .duration0 = s_ns_to_ticks(cfg->bit1_high_ns, cfg->resolution_hz),
         .level1 = 0,
         .duration1 = s_ns_to_ticks(cfg->bit1_low_ns, cfg->resolution_hz),
     };
+
     uint16_t reset_ticks = s_ns_to_ticks(cfg->reset_ns, cfg->resolution_hz);
     if (reset_ticks < 2) {
         reset_ticks = 2;
     }
-    h->reset = (rmt_symbol_word_t) {
+    s_rmt.reset = (rmt_symbol_word_t) {
         .level0 = 0,
         .duration0 = reset_ticks / 2,
         .level1 = 0,
         .duration1 = reset_ticks - (reset_ticks / 2),
     };
-    h->msb_first = cfg->msb_first;
+    s_rmt.msb_first = cfg->msb_first;
 
     rmt_tx_channel_config_t tx_cfg = {
         .clk_src = RMT_CLK_SRC_DEFAULT,
@@ -98,101 +108,98 @@ esp_err_t hal_rmt_tx_init(const hal_rmt_tx_config_t *cfg, hal_rmt_tx_handle_t *o
         .trans_queue_depth = cfg->trans_queue_depth,
     };
 
-    esp_err_t ret = rmt_new_tx_channel(&tx_cfg, &h->channel);
+    esp_err_t ret = rmt_new_tx_channel(&tx_cfg, &s_rmt.channel);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "new tx channel failed: %s", esp_err_to_name(ret));
-        free(h);
+        memset(&s_rmt, 0, sizeof(s_rmt));
         return ret;
     }
 
     rmt_simple_encoder_config_t encoder_cfg = {
         .callback = s_encode_byte_stream,
-        .arg = h,
+        .arg = &s_rmt,
     };
-    ret = rmt_new_simple_encoder(&encoder_cfg, &h->encoder);
+    ret = rmt_new_simple_encoder(&encoder_cfg, &s_rmt.encoder);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "new encoder failed: %s", esp_err_to_name(ret));
-        rmt_del_channel(h->channel);
-        free(h);
+        rmt_del_channel(s_rmt.channel);
+        memset(&s_rmt, 0, sizeof(s_rmt));
         return ret;
     }
 
-    *out = h;
+    s_rmt.inited = true;
     return ESP_OK;
 }
 
-esp_err_t hal_rmt_tx_deinit(hal_rmt_tx_handle_t h)
+static esp_err_t s_hal_rmt_tx_deinit(void)
 {
-    if (h == NULL) {
-        ESP_LOGE(TAG, "handle is NULL");
-        return ESP_ERR_INVALID_ARG;
+    if (!s_rmt.inited) {
+        ESP_LOGE(TAG, "RMT is not initialized");
+        return ESP_ERR_INVALID_STATE;
     }
 
-    if (h->enabled) {
-        esp_err_t ret = rmt_disable(h->channel);
+    if (s_rmt.enabled) {
+        esp_err_t ret = rmt_disable(s_rmt.channel);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "disable before deinit failed: %s", esp_err_to_name(ret));
             return ret;
         }
-        h->enabled = false;
+        s_rmt.enabled = false;
     }
 
-    esp_err_t ret = rmt_del_encoder(h->encoder);
+    esp_err_t ret = rmt_del_encoder(s_rmt.encoder);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "delete encoder failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    ret = rmt_del_channel(h->channel);
+    ret = rmt_del_channel(s_rmt.channel);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "delete channel failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    free(h);
+    memset(&s_rmt, 0, sizeof(s_rmt));
     return ESP_OK;
 }
 
-esp_err_t hal_rmt_tx_enable(hal_rmt_tx_handle_t h)
+static esp_err_t s_hal_rmt_tx_enable(void)
 {
-    if (h == NULL) {
-        ESP_LOGE(TAG, "handle is NULL");
-        return ESP_ERR_INVALID_ARG;
+    if (!s_rmt.inited) {
+        ESP_LOGE(TAG, "RMT is not initialized");
+        return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret = rmt_enable(h->channel);
+    esp_err_t ret = rmt_enable(s_rmt.channel);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "enable failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    h->enabled = true;
+    s_rmt.enabled = true;
     return ESP_OK;
 }
 
-esp_err_t hal_rmt_tx_disable(hal_rmt_tx_handle_t h)
+static esp_err_t s_hal_rmt_tx_disable(void)
 {
-    if (h == NULL) {
-        ESP_LOGE(TAG, "handle is NULL");
-        return ESP_ERR_INVALID_ARG;
+    if (!s_rmt.inited) {
+        ESP_LOGE(TAG, "RMT is not initialized");
+        return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret = rmt_disable(h->channel);
+    esp_err_t ret = rmt_disable(s_rmt.channel);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "disable failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    h->enabled = false;
+    s_rmt.enabled = false;
     return ESP_OK;
 }
 
-esp_err_t hal_rmt_tx_transmit(hal_rmt_tx_handle_t h,
-                              const void *data,
-                              size_t len,
-                              int loop_count)
+static esp_err_t s_hal_rmt_tx_transmit(const void *data, size_t len, int loop_count)
 {
-    if (h == NULL || (data == NULL && len > 0)) {
+    if (!s_rmt.inited || (data == NULL && len > 0)) {
         ESP_LOGE(TAG, "invalid transmit arg");
         return ESP_ERR_INVALID_ARG;
     }
@@ -201,23 +208,37 @@ esp_err_t hal_rmt_tx_transmit(hal_rmt_tx_handle_t h,
         .loop_count = loop_count,
     };
 
-    esp_err_t ret = rmt_transmit(h->channel, h->encoder, data, len, &tx_cfg);
+    esp_err_t ret = rmt_transmit(s_rmt.channel, s_rmt.encoder, data, len, &tx_cfg);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "transmit failed: %s", esp_err_to_name(ret));
     }
     return ret;
 }
 
-esp_err_t hal_rmt_tx_wait_done(hal_rmt_tx_handle_t h, int timeout_ms)
+static esp_err_t s_hal_rmt_tx_wait_done(int timeout_ms)
 {
-    if (h == NULL) {
-        ESP_LOGE(TAG, "handle is NULL");
-        return ESP_ERR_INVALID_ARG;
+    if (!s_rmt.inited) {
+        ESP_LOGE(TAG, "RMT is not initialized");
+        return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret = rmt_tx_wait_all_done(h->channel, timeout_ms);
+    esp_err_t ret = rmt_tx_wait_all_done(s_rmt.channel, timeout_ms);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "wait done failed: %s", esp_err_to_name(ret));
     }
     return ret;
+}
+
+static const hal_rmt_ops_t s_hal_rmt_ops = {
+    .tx_init = s_hal_rmt_tx_init,
+    .tx_deinit = s_hal_rmt_tx_deinit,
+    .tx_enable = s_hal_rmt_tx_enable,
+    .tx_disable = s_hal_rmt_tx_disable,
+    .tx_transmit = s_hal_rmt_tx_transmit,
+    .tx_wait_done = s_hal_rmt_tx_wait_done,
+};
+
+const hal_rmt_ops_t *hal_rmt_get_ops(void)
+{
+    return &s_hal_rmt_ops;
 }

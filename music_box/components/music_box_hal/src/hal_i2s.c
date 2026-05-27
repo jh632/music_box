@@ -32,7 +32,7 @@ static esp_err_t s_make_slot_config(const hal_i2s_config_t *cfg,
     return ESP_OK;
 }
 
-esp_err_t hal_i2s_init(const hal_i2s_config_t *cfg)
+static esp_err_t s_hal_i2s_init(const hal_i2s_config_t *cfg)
 {
     if (cfg == NULL || cfg->sample_rate_hz == 0) {
         ESP_LOGE(TAG, "invalid init arg");
@@ -94,7 +94,7 @@ esp_err_t hal_i2s_init(const hal_i2s_config_t *cfg)
     return ESP_OK;
 }
 
-esp_err_t hal_i2s_deinit(void)
+static esp_err_t s_hal_i2s_deinit(void)
 {
     if (s_tx_chan == NULL) {
         ESP_LOGE(TAG, "I2S is not initialized");
@@ -120,7 +120,7 @@ esp_err_t hal_i2s_deinit(void)
     return ESP_OK;
 }
 
-esp_err_t hal_i2s_enable(void)
+static esp_err_t s_hal_i2s_enable(void)
 {
     if (s_tx_chan == NULL) {
         ESP_LOGE(TAG, "I2S is not initialized");
@@ -137,7 +137,7 @@ esp_err_t hal_i2s_enable(void)
     return ESP_OK;
 }
 
-esp_err_t hal_i2s_disable(void)
+static esp_err_t s_hal_i2s_disable(void)
 {
     if (s_tx_chan == NULL) {
         ESP_LOGE(TAG, "I2S is not initialized");
@@ -154,10 +154,10 @@ esp_err_t hal_i2s_disable(void)
     return ESP_OK;
 }
 
-esp_err_t hal_i2s_write(const void *data,
-                        size_t size,
-                        size_t *bytes_written,
-                        uint32_t timeout_ms)
+static esp_err_t s_hal_i2s_write(const void *data,
+                                 size_t size,
+                                 size_t *bytes_written,
+                                 uint32_t timeout_ms)
 {
     if (s_tx_chan == NULL || (data == NULL && size > 0)) {
         ESP_LOGE(TAG, "invalid write arg");
@@ -171,9 +171,9 @@ esp_err_t hal_i2s_write(const void *data,
     return ret;
 }
 
-esp_err_t hal_i2s_preload(const void *data,
-                          size_t size,
-                          size_t *bytes_loaded)
+static esp_err_t s_hal_i2s_preload(const void *data,
+                                   size_t size,
+                                   size_t *bytes_loaded)
 {
     if (s_tx_chan == NULL || (data == NULL && size > 0)) {
         ESP_LOGE(TAG, "invalid preload arg");
@@ -185,4 +185,18 @@ esp_err_t hal_i2s_preload(const void *data,
         ESP_LOGE(TAG, "preload failed: %s", esp_err_to_name(ret));
     }
     return ret;
+}
+
+static const hal_i2s_ops_t s_hal_i2s_ops = {
+    .init = s_hal_i2s_init,
+    .deinit = s_hal_i2s_deinit,
+    .enable = s_hal_i2s_enable,
+    .disable = s_hal_i2s_disable,
+    .write = s_hal_i2s_write,
+    .preload = s_hal_i2s_preload,
+};
+
+const hal_i2s_ops_t *hal_i2s_get_ops(void)
+{
+    return &s_hal_i2s_ops;
 }

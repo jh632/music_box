@@ -2,21 +2,17 @@
 
 ## 当前状态
 
-本次已完成 `components/music_box_hal` 接口收敛调整，重点是按当前项目规模把 HAL 层做薄。
+本次已按最新接口要求调整 `components/music_box_hal`：
 
-已改动的 HAL 模块：
-
-- `hal_gpio`
-- `hal_i2c`
-- `hal_i2s`
-- `hal_rmt`
-- `hal_timer`
+- HAL 头文件只保留 `ops` 操作表和 `_get_ops()`
+- HAL 具体实现函数已收回到 `.c` 内部，改为 `static`
+- HAL 不再对外暴露自定义 handle
 
 ## 本次主要变更
 
-### 1. 去掉 HAL 层 ops 暴露
+### 1. HAL 统一改为 ops 模式
 
-以下模块已删除 `xxx_ops_t` / `xxx_get_ops()`：
+以下模块当前都通过操作表对外提供能力：
 
 - `hal_gpio`
 - `hal_i2c`
@@ -24,48 +20,27 @@
 - `hal_rmt`
 - `hal_timer`
 
-当前 HAL 对外统一保留普通函数接口，不再同时暴露函数表和具体函数。
+头文件对外只保留：
 
-### 2. I2C 简化为 HAL 内部持有句柄
+- `xxx_ops_t`
+- `xxx_get_ops()`
 
-`hal_i2c` 不再暴露：
+不再同时暴露普通函数声明。
 
-- `hal_i2c_bus_handle_t`
-- `hal_i2c_dev_handle_t`
+### 2. handle 已收回模块内部
 
-改为在 `hal_i2c.c` 内部静态保存：
+以下 HAL 模块不再对外暴露 handle：
 
-- `i2c_master_bus_handle_t`
-- `i2c_master_dev_handle_t`
+- `hal_i2c`
+- `hal_i2s`
+- `hal_rmt`
+- `hal_timer`
 
-接口已调整为：
+相关状态和底层句柄已改为模块内静态保存，由 HAL 自己管理。
 
-- `hal_i2c_bus_init(const hal_i2c_bus_config_t *cfg)`
-- `hal_i2c_bus_deinit(void)`
-- `hal_i2c_device_init(const hal_i2c_dev_config_t *cfg)`
-- `hal_i2c_device_deinit(void)`
+### 3. `.c` 内实现已隐藏
 
-### 3. I2S 简化为 HAL 内部持有状态
-
-`hal_i2s` 不再暴露 `hal_i2s_handle_t`。
-
-改为在 `hal_i2s.c` 内部静态保存：
-
-- `i2s_chan_handle_t`
-- `enabled` 状态
-
-接口已调整为：
-
-- `hal_i2s_init(const hal_i2s_config_t *cfg)`
-- `hal_i2s_deinit(void)`
-- `hal_i2s_enable(void)`
-- `hal_i2s_disable(void)`
-
-### 4. RMT / Timer 保留 handle
-
-`hal_rmt` 和 `hal_timer` 当前仍保留 handle 设计，只移除了 ops 暴露。
-
-这样后续如果有多个对象实例，接口还能继续沿用。
+HAL 各模块内部实现函数已改为 `static`，调用方只能通过 `ops->method(...)` 使用。
 
 ## 涉及文件
 
@@ -86,9 +61,20 @@ components/music_box_hal/src/hal_timer.c
 
 - 未新增 Device 层代码
 - 未修改 `main.c`
-- 未做编译 / 烧录 / 运行
-- 未处理后续 `dev_init_all()` 对接
+- 未执行编译 / 烧录 / 运行
+- 未处理 Device 层对新接口的对接
 
-## 说明
+---
 
-本次改动只针对 HAL 接口形式收敛，没有顺手扩展功能，也没有改动无关模块。
+## 按键硬件规划补充
+
+本次按最新原理图规划补充 4 个独立按键，GPIO0 的 Boot 按键仅保留为下载/启动相关用途，不再复用为业务按键。
+
+| GPIO | 按键 | 功能 | 接法 |
+|------|------|------|------|
+| GPIO11 | KEY_MODE | 自动/手动模式 | GPIO → 按键 → GND，内部上拉，低有效 |
+| GPIO12 | KEY_NEXT | 切歌 | GPIO → 按键 → GND，内部上拉，低有效 |
+| GPIO13 | KEY_VOL | 音量控制 | GPIO → 按键 → GND，内部上拉，低有效 |
+| GPIO14 | KEY_PLAY | 播放/暂停 | GPIO → 按键 → GND，内部上拉，低有效 |
+
+说明：当前不预留外部上拉电阻，后续软件初始化按键 GPIO 时需要开启 ESP32-S3 内部上拉，并按低电平表示按下处理。
