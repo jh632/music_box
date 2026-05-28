@@ -1,0 +1,13 @@
+idf_component_register(
+    SRCS
+        "src/dev_audio.c"
+        "src/dev_led_strip.c"
+        "src/dev_light_sensor.c"
+        "src/dev_display.c"
+        "src/dev_button.c"
+        "src/dev_init.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        hal
+)
