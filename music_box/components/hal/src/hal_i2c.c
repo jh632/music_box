@@ -170,10 +170,18 @@ static esp_err_t s_hal_i2c_write_reg(uint8_t reg_addr,
         return ESP_ERR_INVALID_ARG;
     }
 
-    uint8_t *write_buf = calloc(1, len + sizeof(reg_addr));
-    if (write_buf == NULL) {
-        ESP_LOGE(TAG, "OOM");
-        return ESP_ERR_NO_MEM;
+    size_t total_len = len + sizeof(reg_addr);
+    uint8_t stack_buf[32];
+    uint8_t *write_buf = stack_buf;
+    bool use_heap = false;
+
+    if (total_len > sizeof(stack_buf)) {
+        write_buf = malloc(total_len);
+        if (write_buf == NULL) {
+            ESP_LOGE(TAG, "OOM");
+            return ESP_ERR_NO_MEM;
+        }
+        use_heap = true;
     }
 
     write_buf[0] = reg_addr;
@@ -181,8 +189,10 @@ static esp_err_t s_hal_i2c_write_reg(uint8_t reg_addr,
         memcpy(&write_buf[1], data, len);
     }
 
-    esp_err_t ret = s_hal_i2c_transmit(write_buf, len + sizeof(reg_addr), timeout_ms);
-    free(write_buf);
+    esp_err_t ret = s_hal_i2c_transmit(write_buf, total_len, timeout_ms);
+    if (use_heap) {
+        free(write_buf);
+    }
     return ret;
 }
 

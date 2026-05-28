@@ -49,9 +49,10 @@ static size_t s_encode_byte_stream(const void *data,
     size_t data_pos = symbols_written / 8;
     const uint8_t *bytes = (const uint8_t *)data;
     if (data_pos < data_size) {
+        bool msb_first = ctx->msb_first;
         uint8_t byte = bytes[data_pos];
         for (size_t i = 0; i < 8; i++) {
-            uint8_t bit_index = ctx->msb_first ? (7 - i) : i;
+            uint8_t bit_index = msb_first ? (7 - i) : i;
             symbols[i] = (byte & (1U << bit_index)) ? ctx->bit1 : ctx->bit0;
         }
         return 8;
