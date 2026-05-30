@@ -5,6 +5,7 @@ idf_component_register(
         "src/hal_i2s.c"
         "src/hal_rmt.c"
         "src/hal_timer.c"
+        "src/hal_adc.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
@@ -13,4 +14,5 @@ idf_component_register(
         esp_driver_i2s
         esp_driver_rmt
         esp_timer
+        esp_adc
 )
