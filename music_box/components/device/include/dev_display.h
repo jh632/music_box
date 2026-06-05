@@ -1,7 +1,7 @@
 #pragma once
 
 #include <stdint.h>
-#include "driver/i2c_master.h"
+#include "hal_i2c.h"
 #include "esp_err.h"
 
 #ifdef __cplusplus
