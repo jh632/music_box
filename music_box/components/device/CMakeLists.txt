@@ -9,5 +9,5 @@ idf_component_register(
     INCLUDE_DIRS
         "include"
     REQUIRES
-        hal
+        music_hal
 )

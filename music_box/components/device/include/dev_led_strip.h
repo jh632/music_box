@@ -1,7 +1,7 @@
 #pragma once
 
 #include <stdint.h>
-#include "driver/gpio.h"
+#include "hal_rmt.h"
 #include "esp_err.h"
 
 #ifdef __cplusplus

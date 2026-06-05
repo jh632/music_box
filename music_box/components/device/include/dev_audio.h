@@ -1,8 +1,6 @@
 #pragma once
 
 #include <stdint.h>
-#include "driver/gpio.h"
-#include "driver/i2s_std.h"
 #include "esp_err.h"
 #include "hal_i2s.h"
 
