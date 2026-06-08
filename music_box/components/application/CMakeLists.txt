@@ -1,0 +1,9 @@
+idf_component_register(
+    SRCS
+        "src/app_audio_verify.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        device
+        spiffs
+)
