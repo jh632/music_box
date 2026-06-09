@@ -52,12 +52,6 @@ typedef struct {
  * ================================================================ */
 
 /**
- * @brief 全局设备句柄，由 main() 调用 dev_init_all() 初始化。
- *        应用层各模块通过此变量访问已初始化的外设。
- */
-extern dev_handles_t g_dev_handles;
-
-/**
  * @brief 初始化所有板上外设（OLED / Audio / LED / Light Sensor）
  *        返回包含各设备句柄的结构体。部分句柄可能为 NULL（对应设备初始化失败）。
  *

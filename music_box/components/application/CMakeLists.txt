@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "src/app_audio_verify.c"
+        "src/app_music_player.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
