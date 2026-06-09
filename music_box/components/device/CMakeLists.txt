@@ -10,6 +10,7 @@ idf_component_register(
         "include"
     REQUIRES
         music_hal
+        multibutton
         esp-audio-player
         esp_driver_i2c
 )
