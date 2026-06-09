@@ -59,4 +59,17 @@ void app_main(void)
 
     /* 打印内存 */
     displayMemoryUsage();
+
+    /* 主循环：驱动播放器 + 内存监控（每 5s 打印一次） */
+    uint32_t mem_tick = 0;
+    while (true) {
+        app_music_player_tick();
+
+        if (++mem_tick >= 50) {   /* 50 * 100ms = 5s */
+            mem_tick = 0;
+            displayMemoryUsage();
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 }

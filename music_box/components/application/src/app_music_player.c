@@ -6,9 +6,6 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_spiffs.h"
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 
 #include <dirent.h>
 #include <string.h>
@@ -22,7 +19,6 @@ static const char *TAG = "APP_MUSIC";
 #define SPIFFS_MOUNT_POINT   "/spiffs"
 #define SPIFFS_PART_LABEL    "storage"
 
-#define TICK_MS              100            /* tick 周期 */
 #define VOL_INDICATE_TICKS   20             /* 调音量时 LED 显示时长 (20*100ms=2s) */
 
 #define VOL_INTERNAL(ext)    ((ext) * 10)   /* 外部 0-10 → 内部 0-100 */
@@ -39,8 +35,6 @@ typedef struct {
 } track_t;
 
 static track_t   s_tracks[APP_MUSIC_MAX_TRACKS];
-static uint8_t   s_track_count;
-static uint8_t   s_track_index;      /* 当前播放曲目 (0-based) */
 
 /* ================================================================
  * 运行时状态
@@ -51,6 +45,7 @@ static dev_audio_state_t s_prev_audio_state;
 static uint8_t s_vol_indicate_remain;   /* >0 时 LED 显示音量条 */
 
 static bool s_spiffs_mounted;
+static bool s_was_dark;
 
 /* 保存由 init() 传入的设备句柄 */
 static const dev_handles_t *s_hd;
@@ -82,9 +77,6 @@ static void led_show_volume(uint8_t vol)
 
     /* vol 范围 0-10, 按比例映射到 0-8 个 LED */
     uint8_t lit = (vol * DEV_LED_MAX + APP_MUSIC_VOLUME_MAX / 2) / APP_MUSIC_VOLUME_MAX;
-    if (lit > DEV_LED_MAX) {
-        lit = DEV_LED_MAX;
-    }
 
     for (uint8_t i = 0; i < DEV_LED_MAX; i++) {
         ops->set(s_hd->led_strip, i, i < lit);
@@ -96,7 +88,7 @@ static void led_show_volume(uint8_t vol)
  * ================================================================ */
 static void play_track(uint8_t index)
 {
-    if (index >= s_track_count) {
+    if (index >= s_state.track_total) {
         return;
     }
 
@@ -108,7 +100,6 @@ static void play_track(uint8_t index)
     /* 停止当前播放 */
     audio->stop(s_hd->audio);
 
-    s_track_index       = index;
     s_prev_audio_state  = DEV_AUDIO_STATE_IDLE;
 
     /* 更新显示状态 */
@@ -123,12 +114,12 @@ static void play_track(uint8_t index)
         s_state.is_playing = false;
         return;
     }
-    ESP_LOGI(TAG, "playing [%d/%d] %s", index + 1, s_track_count, s_tracks[index].name);
+    ESP_LOGI(TAG, "playing [%d/%d] %s", index + 1, s_state.track_total, s_tracks[index].name);
 }
 
 static void play_next(void)
 {
-    if (s_track_count == 0) {
+    if (s_state.track_total == 0) {
         return;
     }
 
@@ -139,64 +130,58 @@ static void play_next(void)
 
     case APP_MUSIC_MODE_SHUFFLE: {
         uint8_t next;
-        do {
-            next = esp_random() % s_track_count;
-        } while (next == s_track_index && s_track_count > 1);
-        s_track_index = next;
+        if (s_state.track_total > 1) {
+            do {
+                next = esp_random() % s_state.track_total;
+            } while (next == s_state.track_index);
+        } else {
+            next = s_state.track_index;
+        }
+        s_state.track_index = next;
         break;
     }
 
     case APP_MUSIC_MODE_SEQUENTIAL:
     default:
-        s_track_index = (s_track_index + 1) % s_track_count;
+        s_state.track_index = (s_state.track_index + 1) % s_state.track_total;
         break;
     }
 
-    play_track(s_track_index);
+    play_track(s_state.track_index);
 }
 
 static void play_prev(void)
 {
-    if (s_track_count == 0) {
+    if (s_state.track_total == 0) {
         return;
     }
 
     /* 上一首只在顺序模式下有意义；随机模式回退到上一曲目索引或重选 */
     switch (s_state.play_mode) {
     case APP_MUSIC_MODE_SHUFFLE:
-        s_track_index = esp_random() % s_track_count;
+        s_state.track_index = esp_random() % s_state.track_total;
         break;
 
     case APP_MUSIC_MODE_SINGLE_REPEAT:
     case APP_MUSIC_MODE_SEQUENTIAL:
     default:
-        s_track_index = (s_track_index == 0) ? s_track_count - 1 : s_track_index - 1;
+        s_state.track_index = (s_state.track_index == 0) ? s_state.track_total - 1 : s_state.track_index - 1;
         break;
     }
 
-    play_track(s_track_index);
+    play_track(s_state.track_index);
 }
 
 /* ================================================================
  * 音量
  * ================================================================ */
-static void volume_up(void)
+static void volume_add(int8_t delta)
 {
-    if (s_state.volume >= APP_MUSIC_VOLUME_MAX) {
+    uint8_t new_vol = s_state.volume + delta;
+    if (new_vol < APP_MUSIC_VOLUME_MIN || new_vol > APP_MUSIC_VOLUME_MAX) {
         return;
     }
-    s_state.volume++;
-    dev_audio_get_ops()->set_volume(s_hd->audio, VOL_INTERNAL(s_state.volume));
-    s_vol_indicate_remain = VOL_INDICATE_TICKS;
-    ESP_LOGI(TAG, "volume: %d", s_state.volume);
-}
-
-static void volume_down(void)
-{
-    if (s_state.volume <= APP_MUSIC_VOLUME_MIN) {
-        return;
-    }
-    s_state.volume--;
+    s_state.volume = new_vol;
     dev_audio_get_ops()->set_volume(s_hd->audio, VOL_INTERNAL(s_state.volume));
     s_vol_indicate_remain = VOL_INDICATE_TICKS;
     ESP_LOGI(TAG, "volume: %d", s_state.volume);
@@ -221,7 +206,7 @@ static void cycle_play_mode(void)
 static void toggle_play(void)
 {
     const dev_audio_ops_t *audio = dev_audio_get_ops();
-    if (s_hd->audio == NULL || s_track_count == 0) {
+    if (s_hd->audio == NULL || s_state.track_total == 0) {
         return;
     }
 
@@ -262,9 +247,9 @@ static void button_callback(dev_button_handle_t handle,
 
     case 2: /* KEY3 - 音量 */
         if (event == DEV_BTN_EVT_SHORT_UP) {
-            volume_up();
+            volume_add(1);
         } else if (event == DEV_BTN_EVT_LONG_UP || event == DEV_BTN_EVT_VERY_LONG_UP) {
-            volume_down();
+            volume_add(-1);
         }
         break;
 
@@ -336,49 +321,40 @@ static void scan_tracks(void)
         return;
     }
 
-    s_track_count = 0;
+    s_state.track_total = 0;
 
     struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL && s_track_count < APP_MUSIC_MAX_TRACKS) {
+    while ((entry = readdir(dir)) != NULL && s_state.track_total < APP_MUSIC_MAX_TRACKS) {
         const char *dot = strrchr(entry->d_name, '.');
         if (dot == NULL) {
             continue;
         }
 
-        /* 忽略大小写检查 .mp3 */
-        char ext[8];
-        size_t i;
-        for (i = 0; i < sizeof(ext) - 1 && dot[i] != '\0'; i++) {
-            char c = dot[i];
-            ext[i] = (c >= 'A' && c <= 'Z') ? (c - 'A' + 'a') : c;
-        }
-        ext[i] = '\0';
-
-        if (strcmp(ext, ".mp3") != 0) {
+        if (strcasecmp(dot, ".mp3") != 0) {
             continue;
         }
 
         /* 复制显示名（去掉扩展名） */
         size_t name_len = (size_t)(dot - entry->d_name);
-        if (name_len > sizeof(s_tracks[s_track_count].name) - 1) {
-            name_len = sizeof(s_tracks[s_track_count].name) - 1;
+        if (name_len > sizeof(s_tracks[s_state.track_total].name) - 1) {
+            name_len = sizeof(s_tracks[s_state.track_total].name) - 1;
         }
-        memcpy(s_tracks[s_track_count].name, entry->d_name, name_len);
-        s_tracks[s_track_count].name[name_len] = '\0';
+        memcpy(s_tracks[s_state.track_total].name, entry->d_name, name_len);
+        s_tracks[s_state.track_total].name[name_len] = '\0';
 
-        snprintf(s_tracks[s_track_count].path, sizeof(s_tracks[s_track_count].path),
+        snprintf(s_tracks[s_state.track_total].path, sizeof(s_tracks[s_state.track_total].path),
                  "%s/%s", SPIFFS_MOUNT_POINT, entry->d_name);
 
-        s_track_count++;
+        s_state.track_total++;
     }
 
     closedir(dir);
 
     /* 按文件名排序 */
-    qsort(s_tracks, s_track_count, sizeof(track_t), sort_by_name);
+    qsort(s_tracks, s_state.track_total, sizeof(track_t), sort_by_name);
 
-    ESP_LOGI(TAG, "found %d track(s)", s_track_count);
-    for (uint8_t i = 0; i < s_track_count; i++) {
+    ESP_LOGI(TAG, "found %d track(s)", s_state.track_total);
+    for (uint8_t i = 0; i < s_state.track_total; i++) {
         ESP_LOGI(TAG, "  [%d] %s", i, s_tracks[i].name);
     }
 }
@@ -392,7 +368,6 @@ static void light_sensor_poll(void)
         return;
     }
 
-    static bool s_was_dark = false;
     bool is_dark = false;
 
     esp_err_t ret = dev_light_sensor_get_ops()->get_status(s_hd->light_sensor, &is_dark);
@@ -458,14 +433,13 @@ esp_err_t app_music_player_init(const dev_handles_t *handles)
 
     /* 2. 扫描歌曲 */
     scan_tracks();
-    if (s_track_count == 0) {
+    if (s_state.track_total == 0) {
         ESP_LOGW(TAG, "no tracks found");
     }
 
     /* 3. 初始化状态 */
     s_state.volume     = APP_MUSIC_VOLUME_DEFAULT;
     s_state.play_mode  = APP_MUSIC_MODE_SEQUENTIAL;
-    s_state.track_total = s_track_count;
     s_state.is_playing = false;
 
     /* 4. 创建按键 */
@@ -479,7 +453,7 @@ esp_err_t app_music_player_init(const dev_handles_t *handles)
     led_all_off();
 
     /* 6. 播放第一首 */
-    if (s_track_count > 0) {
+    if (s_state.track_total > 0) {
         play_track(0);
     }
 
@@ -493,7 +467,7 @@ void app_music_player_tick(void)
      * 1. 检测音频是否结束 → 自动下一首
      * ============================================================== */
     dev_audio_state_t audio_state;
-    if (s_hd->audio &&
+    if (s_hd->audio && s_state.is_playing &&
         dev_audio_get_ops()->get_state(s_hd->audio, &audio_state) == ESP_OK) {
 
         if (STATE_IS_PLAYING(s_prev_audio_state) && STATE_IS_IDLE(audio_state)) {
