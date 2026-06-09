@@ -10,6 +10,7 @@ extern "C" {
 #endif
 
 typedef void (*hal_timer_cb_t)(void *arg);
+typedef struct hal_timer_s *hal_timer_handle_t;
 
 typedef struct {
     hal_timer_cb_t callback;
@@ -23,11 +24,11 @@ typedef struct {
  * @brief Timer HAL 操作表
  */
 typedef struct {
-    esp_err_t (*create)(const hal_timer_config_t *cfg);
-    esp_err_t (*del)(void);
-    esp_err_t (*start_once)(uint64_t timeout_us);
-    esp_err_t (*start_periodic)(uint64_t period_us);
-    esp_err_t (*stop)(void);
+    esp_err_t (*create)(const hal_timer_config_t *cfg, hal_timer_handle_t *out_handle);
+    esp_err_t (*del)(hal_timer_handle_t handle);
+    esp_err_t (*start_once)(hal_timer_handle_t handle, uint64_t timeout_us);
+    esp_err_t (*start_periodic)(hal_timer_handle_t handle, uint64_t period_us);
+    esp_err_t (*stop)(hal_timer_handle_t handle);
 } hal_timer_ops_t;
 
 const hal_timer_ops_t *hal_timer_get_ops(void);

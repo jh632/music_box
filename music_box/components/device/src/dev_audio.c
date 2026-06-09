@@ -11,6 +11,7 @@ static const char *TAG = "DEV_AUDIO";
 
 #define DEV_AUDIO_DEFAULT_VOLUME 60
 #define DEV_AUDIO_MAX_VOLUME     100
+#define DEV_AUDIO_VOLUME_ATTENUATE  5  // 输出再整体压低 5 倍
 
 struct dev_audio_s {
     const hal_i2s_ops_t  *i2s_ops;
@@ -208,7 +209,7 @@ static void dev_audio_apply_volume(dev_audio_handle_t h, void *audio_buffer, siz
     int16_t *samples = (int16_t *)audio_buffer;
     size_t   count   = len / sizeof(int16_t);
     for (size_t i = 0; i < count; i++) {
-        samples[i] = (int16_t)(((int32_t)samples[i] * volume) / DEV_AUDIO_MAX_VOLUME);
+        samples[i] = (int16_t)(((int32_t)samples[i] * volume) / (DEV_AUDIO_MAX_VOLUME * DEV_AUDIO_VOLUME_ATTENUATE));
     }
 }
 
