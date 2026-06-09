@@ -7,6 +7,7 @@ struct dev_button_s {
     uint8_t            active_level;
     dev_btn_callback_t callback;
     void              *user_data;
+    hal_timer_handle_t timer;
 
     /* 时间阈值 (ms) */
     uint32_t debounce_th;        // 消抖
@@ -174,7 +175,7 @@ static esp_err_t dev_button_create(const dev_button_config_t *config,
         .callback = button_timer_callback,
         .arg      = h,
     };
-    ret = timer_ops->create(&timer_cfg);
+    ret = timer_ops->create(&timer_cfg, &h->timer);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Timer create failed");
         free(h);
@@ -202,10 +203,10 @@ static esp_err_t dev_button_create(const dev_button_config_t *config,
     h->debounce_change_ts = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
     /* 启动周期扫描 */
-    ret = timer_ops->start_periodic(SCAN_PERIOD_US);
+    ret = timer_ops->start_periodic(h->timer, SCAN_PERIOD_US);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Timer start failed");
-        timer_ops->del();
+        timer_ops->del(h->timer);
         free(h);
         return ret;
     }
@@ -228,8 +229,11 @@ static esp_err_t dev_button_delete(dev_button_handle_t handle)
     }
     const hal_timer_ops_t *timer_ops = hal_timer_get_ops();
 
-    timer_ops->stop();
-    timer_ops->del();
+    if (handle->timer != NULL) {
+        timer_ops->stop(handle->timer);
+        timer_ops->del(handle->timer);
+        handle->timer = NULL;
+    }
     free(handle);
     return ESP_OK;
 }

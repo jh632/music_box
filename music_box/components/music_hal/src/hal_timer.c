@@ -4,17 +4,21 @@
 
 static const char *TAG = "HAL_TIMER";
 
-static esp_timer_handle_t s_timer;
+typedef struct hal_timer_s {
+    esp_timer_handle_t timer;
+} hal_timer_t;
 
-static esp_err_t s_hal_timer_create(const hal_timer_config_t *cfg)
+static esp_err_t s_hal_timer_create(const hal_timer_config_t *cfg, hal_timer_handle_t *out_handle)
 {
-    if (cfg == NULL || cfg->callback == NULL) {
+    if (cfg == NULL || cfg->callback == NULL || out_handle == NULL) {
         ESP_LOGE(TAG, "invalid create arg");
         return ESP_ERR_INVALID_ARG;
     }
-    if (s_timer != NULL) {
-        ESP_LOGE(TAG, "timer already created");
-        return ESP_ERR_INVALID_STATE;
+
+    hal_timer_t *handle = calloc(1, sizeof(*handle));
+    if (handle == NULL) {
+        ESP_LOGE(TAG, "out of memory");
+        return ESP_ERR_NO_MEM;
     }
 
     esp_timer_create_args_t args = {
@@ -25,66 +29,71 @@ static esp_err_t s_hal_timer_create(const hal_timer_config_t *cfg)
         .skip_unhandled_events = cfg->skip_unhandled_events,
     };
 
-    esp_err_t ret = esp_timer_create(&args, &s_timer);
+    esp_err_t ret = esp_timer_create(&args, &handle->timer);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "create failed: %s", esp_err_to_name(ret));
+        free(handle);
+        return ret;
     }
-    return ret;
+
+    *out_handle = handle;
+    return ESP_OK;
 }
 
-static esp_err_t s_hal_timer_delete(void)
+static esp_err_t s_hal_timer_delete(hal_timer_handle_t handle)
 {
-    if (s_timer == NULL) {
+    if (handle == NULL || handle->timer == NULL) {
         ESP_LOGE(TAG, "timer is not created");
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret = esp_timer_delete(s_timer);
+    esp_err_t ret = esp_timer_delete(handle->timer);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "delete failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    s_timer = NULL;
+    handle->timer = NULL;
+    free(handle);
     return ESP_OK;
 }
 
-static esp_err_t s_hal_timer_start_once(uint64_t timeout_us)
+static esp_err_t s_hal_timer_start_once(hal_timer_handle_t handle, uint64_t timeout_us)
 {
-    if (s_timer == NULL) {
+    if (handle == NULL || handle->timer == NULL) {
         ESP_LOGE(TAG, "timer is not created");
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret = esp_timer_start_once(s_timer, timeout_us);
+    esp_err_t ret = esp_timer_start_once(handle->timer, timeout_us);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "start once failed: %s", esp_err_to_name(ret));
     }
     return ret;
 }
 
-static esp_err_t s_hal_timer_start_periodic(uint64_t period_us)
+static esp_err_t s_hal_timer_start_periodic(hal_timer_handle_t handle, uint64_t period_us)
 {
-    if (s_timer == NULL) {
+    if (handle == NULL || handle->timer == NULL) {
         ESP_LOGE(TAG, "timer is not created");
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret = esp_timer_start_periodic(s_timer, period_us);
+    esp_err_t ret = esp_timer_start_periodic(handle->timer, period_us);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "start periodic failed: %s", esp_err_to_name(ret));
     }
     return ret;
 }
 
-static esp_err_t s_hal_timer_stop(void)
+static esp_err_t s_hal_timer_stop(hal_timer_handle_t handle)
 {
-    if (s_timer == NULL) {
+    if (handle == NULL || handle->timer == NULL) {
         ESP_LOGE(TAG, "timer is not created");
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret = esp_timer_stop(s_timer);
+    esp_err_t ret = esp_timer_stop(handle->timer);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "stop failed: %s", esp_err_to_name(ret));
     }

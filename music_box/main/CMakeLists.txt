@@ -4,5 +4,8 @@ idf_component_register(
     INCLUDE_DIRS
         "."
     REQUIRES
+        application
         nvs_flash
 )
+
+spiffs_create_partition_image(storage ../spiffs FLASH_IN_PROJECT)
