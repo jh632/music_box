@@ -1,6 +1,25 @@
 #include "dev_button.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 static const char *TAG = "DEV_BUTTON";
+
+/* 共享定时器相关 */
+static dev_button_handle_t s_button_list  = NULL;
+static uint32_t            s_button_count = 0;
+static SemaphoreHandle_t   s_list_mutex   = NULL;
+
+static esp_err_t ensure_mutex_init(void)
+{
+    if (s_list_mutex == NULL) {
+        s_list_mutex = xSemaphoreCreateMutex();
+        if (s_list_mutex == NULL) {
+            ESP_LOGE(TAG, "Failed to create list mutex");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    return ESP_OK;
+}
 
 struct dev_button_s {
     gpio_num_t         gpio;
@@ -29,6 +48,8 @@ struct dev_button_s {
     bool     wait_second_press;   // 等待第二次按下
     bool     second_press_active; // 第二次按下已开始
     uint32_t first_release_ts;    // 第一次释放时刻
+
+    struct dev_button_s *next;    // 链表指针
 };
 
 static bool read_pressed(dev_button_handle_t h)
@@ -48,92 +69,135 @@ static bool read_pressed(dev_button_handle_t h)
  */
 static void button_timer_callback(void *arg)
 {
-    dev_button_handle_t h   = (dev_button_handle_t)arg;
-    uint32_t            ts  = (uint32_t)(esp_timer_get_time() / 1000ULL);
-    bool                raw = read_pressed(h);
+    (void)arg;
 
-    /* --- 消抖 --- */
-    if (raw != h->cur_pressed) {
-        h->cur_pressed        = raw;
-        h->debounce_change_ts = ts;
+    /* 非阻塞 trylock，锁被持有时跳过此周期 */
+    if (xSemaphoreTake(s_list_mutex, 0) != pdTRUE) {
+        return;
     }
 
-    if (h->stable_pressed != h->cur_pressed && (ts - h->debounce_change_ts) >= h->debounce_th) {
-        h->stable_pressed = h->cur_pressed;
+    uint32_t ts = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
-        if (h->stable_pressed) {
-            /* === 按下沿 === */
-            if (h->wait_second_press) {
-                uint32_t gap = ts - h->first_release_ts;
-                if (gap <= h->double_press_th) {
-                    h->second_press_active = true;
-                } else {
-                    h->callback(h, DEV_BTN_EVT_SHORT_UP, h->user_data);
-                    h->wait_second_press   = false;
-                    h->second_press_active = false;
+    /* 第一遍：锁内运行状态机，仅记录待发事件，不直接调用回调 */
+    typedef struct {
+        dev_button_handle_t h;
+        dev_btn_event_t     evt;
+    } pending_evt_t;
+
+    pending_evt_t pending[32];
+    int           pending_cnt = 0;
+
+    for (dev_button_handle_t h = s_button_list; h != NULL; h = h->next) {
+        bool raw = read_pressed(h);
+
+        /* --- 消抖 --- */
+        if (raw != h->cur_pressed) {
+            h->cur_pressed        = raw;
+            h->debounce_change_ts = ts;
+        }
+
+        if (h->stable_pressed != h->cur_pressed && (ts - h->debounce_change_ts) >= h->debounce_th) {
+            h->stable_pressed = h->cur_pressed;
+
+            if (h->stable_pressed) {
+                /* === 按下沿 === */
+                if (h->wait_second_press) {
+                    uint32_t gap = ts - h->first_release_ts;
+                    if (gap <= h->double_press_th) {
+                        h->second_press_active = true;
+                    } else {
+                        pending[pending_cnt].h   = h;
+                        pending[pending_cnt].evt = DEV_BTN_EVT_SHORT_UP;
+                        pending_cnt++;
+                        h->wait_second_press   = false;
+                        h->second_press_active = false;
+                    }
                 }
-            }
-            h->press_down_ts        = ts;
-            h->long_hold_fired      = false;
-            h->very_long_hold_fired = false;
+                h->press_down_ts        = ts;
+                h->long_hold_fired      = false;
+                h->very_long_hold_fired = false;
 
-        } else {
-            /* === 释放沿 === */
+            } else {
+                /* === 释放沿 === */
+                uint32_t duration = ts - h->press_down_ts;
+
+                if (duration <= h->short_press_th) {
+                    /* 短按区间：进入双击检测 */
+                    if (h->wait_second_press && h->second_press_active) {
+                        pending[pending_cnt].h   = h;
+                        pending[pending_cnt].evt = DEV_BTN_EVT_DOUBLE_UP;
+                        pending_cnt++;
+                        h->wait_second_press = false;
+                    } else {
+                        h->wait_second_press = true;
+                        h->first_release_ts  = ts;
+                    }
+                } else if (duration < h->long_press_th) {
+                    /* 介于短按和长按之间：若是第二击则仍判定为双击 */
+                    if (h->wait_second_press && h->second_press_active) {
+                        pending[pending_cnt].h   = h;
+                        pending[pending_cnt].evt = DEV_BTN_EVT_DOUBLE_UP;
+                        pending_cnt++;
+                    } else {
+                        pending[pending_cnt].h   = h;
+                        pending[pending_cnt].evt = DEV_BTN_EVT_SHORT_UP;
+                        pending_cnt++;
+                    }
+                    h->wait_second_press = false;
+                } else if (duration < h->very_long_press_th) {
+                    /* 长按释放 */
+                    pending[pending_cnt].h   = h;
+                    pending[pending_cnt].evt = DEV_BTN_EVT_LONG_UP;
+                    pending_cnt++;
+                    if (h->wait_second_press) {
+                        h->wait_second_press = false;
+                    }
+                } else {
+                    /* 超长按释放 */
+                    pending[pending_cnt].h   = h;
+                    pending[pending_cnt].evt = DEV_BTN_EVT_VERY_LONG_UP;
+                    pending_cnt++;
+                    if (h->wait_second_press) {
+                        h->wait_second_press = false;
+                    }
+                }
+                h->second_press_active = false;
+            }
+        }
+
+        /* --- 双击超时：确认为单击 --- */
+        if (h->wait_second_press && !h->stable_pressed && !h->second_press_active &&
+            (ts - h->first_release_ts) >= h->double_press_th) {
+            pending[pending_cnt].h   = h;
+            pending[pending_cnt].evt = DEV_BTN_EVT_SHORT_UP;
+            pending_cnt++;
+            h->wait_second_press = false;
+        }
+
+        /* --- 按住时 HOLD 检测 --- */
+        if (h->stable_pressed) {
             uint32_t duration = ts - h->press_down_ts;
 
-            if (duration <= h->short_press_th) {
-                /* 短按区间：进入双击检测 */
-                if (h->wait_second_press && h->second_press_active) {
-                    h->callback(h, DEV_BTN_EVT_DOUBLE_UP, h->user_data);
-                    h->wait_second_press = false;
-                } else {
-                    h->wait_second_press = true;
-                    h->first_release_ts  = ts;
-                }
-            } else if (duration < h->long_press_th) {
-                /* 介于短按和长按之间：若是第二击则仍判定为双击 */
-                if (h->wait_second_press && h->second_press_active) {
-                    h->callback(h, DEV_BTN_EVT_DOUBLE_UP, h->user_data);
-                } else {
-                    h->callback(h, DEV_BTN_EVT_SHORT_UP, h->user_data);
-                }
-                h->wait_second_press = false;
-            } else if (duration < h->very_long_press_th) {
-                /* 长按释放 */
-                h->callback(h, DEV_BTN_EVT_LONG_UP, h->user_data);
-                if (h->wait_second_press) {
-                    h->wait_second_press = false;
-                }
-            } else {
-                /* 超长按释放 */
-                h->callback(h, DEV_BTN_EVT_VERY_LONG_UP, h->user_data);
-                if (h->wait_second_press) {
-                    h->wait_second_press = false;
-                }
+            if (!h->long_hold_fired && duration >= h->long_press_th) {
+                h->long_hold_fired = true;
+                pending[pending_cnt].h   = h;
+                pending[pending_cnt].evt = DEV_BTN_EVT_LONG_HOLD;
+                pending_cnt++;
             }
-            h->second_press_active = false;
-        }
-    }
+            if (!h->very_long_hold_fired && duration >= h->very_long_press_th) {
+                h->very_long_hold_fired = true;
+                pending[pending_cnt].h   = h;
+                pending[pending_cnt].evt = DEV_BTN_EVT_VERY_LONG_HOLD;
+                pending_cnt++;
+            }
+        } /* if (h->stable_pressed) 结束 */
+    }     /* for 结束 */
 
-    /* --- 双击超时：确认为单击 --- */
-    if (h->wait_second_press && !h->stable_pressed && !h->second_press_active &&
-        (ts - h->first_release_ts) >= h->double_press_th) {
-        h->callback(h, DEV_BTN_EVT_SHORT_UP, h->user_data);
-        h->wait_second_press = false;
-    }
+    xSemaphoreGive(s_list_mutex);
 
-    /* --- 按住时 HOLD 检测 --- */
-    if (h->stable_pressed) {
-        uint32_t duration = ts - h->press_down_ts;
-
-        if (!h->long_hold_fired && duration >= h->long_press_th) {
-            h->long_hold_fired = true;
-            h->callback(h, DEV_BTN_EVT_LONG_HOLD, h->user_data);
-        }
-        if (!h->very_long_hold_fired && duration >= h->very_long_press_th) {
-            h->very_long_hold_fired = true;
-            h->callback(h, DEV_BTN_EVT_VERY_LONG_HOLD, h->user_data);
-        }
+    /* 第二遍：出锁后分发所有待发事件 */
+    for (int i = 0; i < pending_cnt; i++) {
+        pending[i].h->callback(pending[i].h, pending[i].evt, pending[i].h->user_data);
     }
 }
 
@@ -170,13 +234,8 @@ static esp_err_t dev_button_create(const dev_button_config_t *config,
         return ret;
     }
 
-    hal_timer_config_t timer_cfg = {
-        .callback = button_timer_callback,
-        .arg      = h,
-    };
-    ret = timer_ops->create(&timer_cfg);
+    ret = ensure_mutex_init();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Timer create failed");
         free(h);
         return ret;
     }
@@ -201,14 +260,37 @@ static esp_err_t dev_button_create(const dev_button_config_t *config,
     h->stable_pressed     = pressed;
     h->debounce_change_ts = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
-    /* 启动周期扫描 */
-    ret = timer_ops->start_periodic(SCAN_PERIOD_US);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Timer start failed");
-        timer_ops->del();
-        free(h);
-        return ret;
+    /* 共享定时器：第一个按键创建时启动，后续按键共用 */
+    xSemaphoreTake(s_list_mutex, portMAX_DELAY);
+
+    if (s_button_count == 0) {
+        hal_timer_config_t timer_cfg = {
+            .callback = button_timer_callback,
+            .arg      = NULL, /* 回调遍历全局链表，不使用 arg */
+        };
+        ret = timer_ops->create(&timer_cfg);
+        if (ret != ESP_OK) {
+            xSemaphoreGive(s_list_mutex);
+            ESP_LOGE(TAG, "Timer create failed");
+            free(h);
+            return ret;
+        }
+        ret = timer_ops->start_periodic(SCAN_PERIOD_US);
+        if (ret != ESP_OK) {
+            timer_ops->del();
+            xSemaphoreGive(s_list_mutex);
+            ESP_LOGE(TAG, "Timer start failed");
+            free(h);
+            return ret;
+        }
     }
+
+    /* 插入链表头 */
+    h->next       = s_button_list;
+    s_button_list = h;
+    s_button_count++;
+
+    xSemaphoreGive(s_list_mutex);
 
     *out_handle = h;
     ESP_LOGI(TAG,
@@ -228,8 +310,32 @@ static esp_err_t dev_button_delete(dev_button_handle_t handle)
     }
     const hal_timer_ops_t *timer_ops = hal_timer_get_ops();
 
-    timer_ops->stop();
-    timer_ops->del();
+    xSemaphoreTake(s_list_mutex, portMAX_DELAY);
+
+    /* 从单链表中查找并摘除 */
+    dev_button_handle_t *prev = &s_button_list;
+    dev_button_handle_t  cur  = s_button_list;
+    while (cur != NULL && cur != handle) {
+        prev = &cur->next;
+        cur  = cur->next;
+    }
+
+    if (cur == NULL) {
+        xSemaphoreGive(s_list_mutex);
+        ESP_LOGW(TAG, "Handle not found in list");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    *prev = cur->next;
+    s_button_count--;
+
+    if (s_button_count == 0) {
+        timer_ops->stop();
+        timer_ops->del();
+    }
+
+    xSemaphoreGive(s_list_mutex);
+
     free(handle);
     return ESP_OK;
 }

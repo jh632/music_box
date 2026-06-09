@@ -11,11 +11,13 @@ extern "C" {
 typedef struct dev_display_s *dev_display_handle_t;
 
 typedef struct {
-    i2c_port_t i2c_port;
-    uint16_t device_address;
-    uint32_t scl_speed_hz;
-    uint8_t width;
-    uint8_t height;
+    i2c_port_t i2c_port;       // I2C port number
+    int        sda_pin;        // GPIO pin for SDA
+    int        scl_pin;        // GPIO pin for SCL
+    uint16_t   device_address; // I2C device address (e.g. 0x3C)
+    uint32_t   scl_speed_hz;   // I2C clock speed
+    uint8_t    width;          // Display width in pixels
+    uint8_t    height;         // Display height in pixels
 } dev_display_config_t;
 
 typedef struct {

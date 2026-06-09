@@ -10,4 +10,5 @@ idf_component_register(
         "include"
     REQUIRES
         music_hal
+        nixy4__u8g2
 )
