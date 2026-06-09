@@ -5,6 +5,7 @@ idf_component_register(
         "."
     REQUIRES
         application
+        device
         nvs_flash
 )
 
