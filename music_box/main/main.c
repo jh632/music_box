@@ -10,26 +10,37 @@
 static const char *TAG = "MAIN";
 
 // 打印内存使用情况
-void displayMemoryUsage(void) {
+void displayMemoryUsage(void)
+{
     size_t totalDRAM = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
-    size_t freeDRAM = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    size_t usedDRAM = totalDRAM - freeDRAM;
+    size_t freeDRAM  = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t usedDRAM  = totalDRAM - freeDRAM;
 
     size_t totalPSRAM = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
-    size_t freePSRAM = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    size_t usedPSRAM = totalPSRAM - freePSRAM;
+    size_t freePSRAM  = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t usedPSRAM  = totalPSRAM - freePSRAM;
 
-    size_t DRAM_largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    size_t DRAM_largest_block  = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     size_t PSRAM_largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
 
-    float dramUsagePercentage = (float)usedDRAM / totalDRAM * 100;
+    float dramUsagePercentage  = (float)usedDRAM / totalDRAM * 100;
     float psramUsagePercentage = (float)usedPSRAM / totalPSRAM * 100;
 
-    ESP_LOGI(TAG, "DRAM Total: %zu bytes, Used: %zu bytes, Free: %zu bytes,  DRAM_Largest_block: %zu bytes",
-             totalDRAM, usedDRAM, freeDRAM, DRAM_largest_block);
+    ESP_LOGI(
+        TAG,
+        "DRAM Total: %zu bytes, Used: %zu bytes, Free: %zu bytes,  DRAM_Largest_block: %zu bytes",
+        totalDRAM,
+        usedDRAM,
+        freeDRAM,
+        DRAM_largest_block);
     ESP_LOGI(TAG, "DRAM Used: %.2f%%", dramUsagePercentage);
-    ESP_LOGI(TAG, "PSRAM Total: %zu bytes, Used: %zu bytes, Free: %zu bytes, PSRAM_Largest_block: %zu bytes",
-             totalPSRAM, usedPSRAM, freePSRAM, PSRAM_largest_block);
+    ESP_LOGI(
+        TAG,
+        "PSRAM Total: %zu bytes, Used: %zu bytes, Free: %zu bytes, PSRAM_Largest_block: %zu bytes",
+        totalPSRAM,
+        usedPSRAM,
+        freePSRAM,
+        PSRAM_largest_block);
     ESP_LOGI(TAG, "PSRAM Used: %.2f%%", psramUsagePercentage);
 }
 
@@ -46,16 +57,6 @@ void app_main(void)
         ESP_LOGE(TAG, "music player init failed: %s", esp_err_to_name(ret));
     }
 
-    /* 主循环：驱动播放器 + 内存监控（每 5s 打印一次） */
-    uint32_t mem_tick = 0;
-    while (true) {
-        app_music_player_tick();
-
-        if (++mem_tick >= 50) {   /* 50 * 100ms = 5s */
-            mem_tick = 0;
-            displayMemoryUsage();
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
+    /* 打印内存 */
+    displayMemoryUsage();
 }
