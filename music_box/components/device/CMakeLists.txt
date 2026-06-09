@@ -11,4 +11,5 @@ idf_component_register(
     REQUIRES
         music_hal
         esp-audio-player
+        esp_driver_i2c
 )
