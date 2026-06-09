@@ -36,16 +36,18 @@ void app_main(void)
     /* main 只做系统初始化和应用层入口编排。 */
     ESP_ERROR_CHECK(nvs_flash_init());
 
-    esp_err_t ret = app_audio_verify_run();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "audio verify failed: %s", esp_err_to_name(ret));
-        return;
-    }
+    // esp_err_t ret = app_audio_verify_run();
+    // if (ret != ESP_OK) {
+    //     ESP_LOGE(TAG, "audio verify failed: %s", esp_err_to_name(ret));
+    //     return;
+    // }
 
-    ESP_LOGI(TAG, "audio verify finished.");
+    // ESP_LOGI(TAG, "audio verify finished.");
+    OLED_Init();
 
     while (true) {
-        displayMemoryUsage(); //只有测试音乐结束才能打印，还没优化
-        vTaskDelay(pdMS_TO_TICKS(5 * 1000));
+        //displayMemoryUsage(); //只有测试音乐结束才能打印，还没优化
+        OLED_ShowMusicAnimation();
+        vTaskDelay(pdMS_TO_TICKS(300));
     }
 }

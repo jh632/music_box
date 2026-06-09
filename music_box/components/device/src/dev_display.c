@@ -187,6 +187,7 @@ static void oled_controller_init(void)
     ESP_ERROR_CHECK(oled_cmd(0xAF));
 }
 
+//
 static void oled_draw_pixel(int x, int y, bool on)
 {
     if (x < 0 || x >= OLED_WIDTH || y < 0 || y >= OLED_HEIGHT) {
@@ -201,6 +202,105 @@ static void oled_draw_pixel(int x, int y, bool on)
     } else {
         s_oled_buf[index] &= (uint8_t)~mask;
     }
+}
+
+static void oled_draw_hline(int x0, int x1, int y, bool on)
+{
+    if (x0 > x1) {
+        int tmp = x0;
+        x0      = x1;
+        x1      = tmp;
+    }
+
+    for (int x = x0; x <= x1; x++) {
+        oled_draw_pixel(x, y, on);
+    }
+}
+
+static void oled_draw_circle_ring(int cx, int cy, int r, int inner_r, bool on)
+{
+    int r2       = r * r;
+    int inner_r2 = inner_r * inner_r;
+
+    for (int dy = -r; dy <= r; dy++) {
+        for (int dx = -r; dx <= r; dx++) {
+            int d2 = dx * dx + dy * dy;
+            if (d2 <= r2 && d2 >= inner_r2) {
+                oled_draw_pixel(cx + dx, cy + dy, on);
+            }
+        }
+    }
+}
+
+static void oled_fill_circle(int cx, int cy, int r, bool on)
+{
+    int r2 = r * r;
+
+    for (int dy = -r; dy <= r; dy++) {
+        for (int dx = -r; dx <= r; dx++) {
+            if (dx * dx + dy * dy <= r2) {
+                oled_draw_pixel(cx + dx, cy + dy, on);
+            }
+        }
+    }
+}
+
+typedef enum {
+    EYE_STYLE_OPEN = 0,
+    EYE_STYLE_BLINK,
+    EYE_STYLE_WINK,
+} eye_style_t;
+
+typedef struct {
+    int8_t      cx;
+    int8_t      cy;
+    int8_t      pupil_dx;
+    int8_t      pupil_dy;
+    uint8_t     outer_r;
+    uint8_t     inner_r;
+    uint8_t     pupil_r;
+    eye_style_t style;
+} eye_pose_t;
+
+static void oled_draw_eye_pose(const eye_pose_t *eye)
+{
+    switch (eye->style) {
+    case EYE_STYLE_OPEN:
+        oled_draw_circle_ring(eye->cx, eye->cy, eye->outer_r, eye->inner_r, true);
+        oled_fill_circle(eye->cx + eye->pupil_dx, eye->cy + eye->pupil_dy, eye->pupil_r, true);
+        break;
+    case EYE_STYLE_BLINK:
+        /* 两只眼睛一起眨一下，用短弧表示，别画成横线。 */
+        oled_draw_hline(eye->cx - 10, eye->cx - 6, eye->cy + 2, true);
+        oled_draw_hline(eye->cx - 8, eye->cx - 3, eye->cy + 1, true);
+        oled_draw_hline(eye->cx - 5, eye->cx + 5, eye->cy, true);
+        oled_draw_hline(eye->cx + 3, eye->cx + 8, eye->cy + 1, true);
+        oled_draw_hline(eye->cx + 6, eye->cx + 10, eye->cy + 2, true);
+        break;
+    case EYE_STYLE_WINK:
+        /* 右眼 wink 画成上扬粗弧，避免像普通闭眼横线。 */
+        oled_draw_hline(eye->cx - 14, eye->cx - 9, eye->cy + 4, true);
+        oled_draw_hline(eye->cx - 13, eye->cx - 7, eye->cy + 3, true);
+        oled_draw_hline(eye->cx - 10, eye->cx - 4, eye->cy + 1, true);
+        oled_draw_hline(eye->cx - 7, eye->cx + 1, eye->cy - 1, true);
+        oled_draw_hline(eye->cx - 2, eye->cx + 6, eye->cy - 2, true);
+        oled_draw_hline(eye->cx + 4, eye->cx + 11, eye->cy - 1, true);
+        oled_draw_hline(eye->cx + 9, eye->cx + 14, eye->cy + 1, true);
+        oled_draw_hline(eye->cx + 10, eye->cx + 15, eye->cy + 2, true);
+        break;
+    default:
+        break;
+    }
+}
+
+static void oled_draw_smile_mouth(void)
+{
+    /* 固定浅笑，不随动画开合。 */
+    oled_draw_hline(49, 54, 51, true);
+    oled_draw_hline(53, 59, 53, true);
+    oled_draw_hline(58, 70, 55, true);
+    oled_draw_hline(69, 75, 53, true);
+    oled_draw_hline(74, 79, 51, true);
 }
 
 static void oled_draw_char_no_refresh(uint8_t line, uint8_t column, char ch)
@@ -228,6 +328,57 @@ static void oled_draw_char_no_refresh(uint8_t line, uint8_t column, char ch)
             oled_draw_pixel(x + col, y + row * 2 + 1, on);
         }
     }
+}
+
+static void oled_refresh(void);
+
+//
+void OLED_ShowMusicAnimation(void)
+{
+    static uint8_t frame_index;
+    static const eye_pose_t frames[][2] = {
+        /* 正常睁眼。 */
+        {
+            {40, 24, 0, 0, 20, 17, 9, EYE_STYLE_OPEN},
+            {88, 24, 0, 0, 20, 17, 9, EYE_STYLE_OPEN},
+        },
+        /* 两只眼睛同时眨一下。 */
+        {
+            {40, 24, 0, 0, 20, 17, 9, EYE_STYLE_BLINK},
+            {88, 24, 0, 0, 20, 17, 9, EYE_STYLE_BLINK},
+        },
+        /* 眨完恢复，准备 wink。 */
+        {
+            {40, 24, 0, 0, 20, 17, 9, EYE_STYLE_OPEN},
+            {88, 24, 0, 0, 20, 17, 9, EYE_STYLE_OPEN},
+        },
+        /* 右眼开始 wink。 */
+        {
+            {40, 24, 0, 0, 20, 17, 9, EYE_STYLE_OPEN},
+            {88, 24, 0, 0, 0, 0, 0, EYE_STYLE_WINK},
+        },
+        /* wink 维持一下。 */
+        {
+            {40, 24, 0, 0, 20, 17, 9, EYE_STYLE_OPEN},
+            {88, 24, 0, 0, 0, 0, 0, EYE_STYLE_WINK},
+        },
+        /* 恢复正常。 */
+        {
+            {40, 24, 0, 0, 20, 17, 9, EYE_STYLE_OPEN},
+            {88, 24, 0, 0, 20, 17, 9, EYE_STYLE_OPEN},
+        },
+    };
+    uint8_t frame_count = (uint8_t)(sizeof(frames) / sizeof(frames[0]));
+    uint8_t frame = frame_index % frame_count;
+
+    memset(s_oled_buf, 0, sizeof(s_oled_buf));
+
+    oled_draw_eye_pose(&frames[frame][0]);
+    oled_draw_eye_pose(&frames[frame][1]);
+    oled_draw_smile_mouth();
+
+    oled_refresh();
+    frame_index = (uint8_t)((frame_index + 1) % frame_count);
 }
 
 static void oled_refresh(void)
