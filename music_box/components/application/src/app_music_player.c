@@ -19,28 +19,28 @@ static const char *TAG = "APP_MUSIC";
 /* ================================================================
  * 常量
  * ================================================================ */
-#define SPIFFS_MOUNT_POINT   "/spiffs"
-#define SPIFFS_PART_LABEL    "storage"
+#define SPIFFS_MOUNT_POINT "/spiffs"
+#define SPIFFS_PART_LABEL  "storage"
 
-#define TICK_MS              100            /* tick 周期 */
-#define VOL_INDICATE_TICKS   20             /* 调音量时 LED 显示时长 (20*100ms=2s) */
+#define TICK_MS            100       /* tick 周期 */
+#define VOL_INDICATE_TICKS 20        /* 调音量时 LED 显示时长 (20*100ms=2s) */
 
-#define VOL_INTERNAL(ext)    ((ext) * 10)   /* 外部 0-10 → 内部 0-100 */
+#define VOL_INTERNAL(ext) ((ext)*10) /* 外部 0-10 → 内部 0-100 */
 
-#define STATE_IS_PLAYING(s)  ((s) == DEV_AUDIO_STATE_PLAYING)
-#define STATE_IS_IDLE(s)     ((s) == DEV_AUDIO_STATE_IDLE)
+#define STATE_IS_PLAYING(s) ((s) == DEV_AUDIO_STATE_PLAYING)
+#define STATE_IS_IDLE(s)    ((s) == DEV_AUDIO_STATE_IDLE)
 
 /* ================================================================
  * 播放列表
  * ================================================================ */
 typedef struct {
     char name[24];
-    char path[264];  /* "/spiffs/" + 255 chars + null */
+    char path[264]; /* "/spiffs/" + 255 chars + null */
 } track_t;
 
-static track_t   s_tracks[APP_MUSIC_MAX_TRACKS];
-static uint8_t   s_track_count;
-static uint8_t   s_track_index;      /* 当前播放曲目 (0-based) */
+static track_t s_tracks[APP_MUSIC_MAX_TRACKS];
+static uint8_t s_track_count;
+static uint8_t s_track_index; /* 当前播放曲目 (0-based) */
 
 /* ================================================================
  * 运行时状态
@@ -48,7 +48,7 @@ static uint8_t   s_track_index;      /* 当前播放曲目 (0-based) */
 static app_music_state_t s_state;
 static dev_audio_state_t s_prev_audio_state;
 
-static uint8_t s_vol_indicate_remain;   /* >0 时 LED 显示音量条 */
+static uint8_t s_vol_indicate_remain; /* >0 时 LED 显示音量条 */
 
 static bool s_spiffs_mounted;
 
@@ -108,14 +108,14 @@ static void play_track(uint8_t index)
     /* 停止当前播放 */
     audio->stop(s_hd->audio);
 
-    s_track_index       = index;
-    s_prev_audio_state  = DEV_AUDIO_STATE_IDLE;
+    s_track_index      = index;
+    s_prev_audio_state = DEV_AUDIO_STATE_IDLE;
 
     /* 更新显示状态 */
     strncpy(s_state.track_name, s_tracks[index].name, sizeof(s_state.track_name) - 1);
     s_state.track_name[sizeof(s_state.track_name) - 1] = '\0';
-    s_state.track_index = index;
-    s_state.is_playing  = true;
+    s_state.track_index                                = index;
+    s_state.is_playing                                 = true;
 
     esp_err_t ret = audio->play(s_hd->audio, s_tracks[index].path);
     if (ret != ESP_OK) {
@@ -206,7 +206,9 @@ static void volume_down(void)
  * 播放模式
  * ================================================================ */
 static const char *s_mode_names[APP_MUSIC_MODE_MAX] = {
-    "顺序", "单曲", "随机",
+    "顺序",
+    "单曲",
+    "随机",
 };
 
 static void cycle_play_mode(void)
@@ -240,9 +242,7 @@ static void toggle_play(void)
 /* ================================================================
  * 按键回调（统一分发）
  * ================================================================ */
-static void button_callback(dev_button_handle_t handle,
-                            dev_btn_event_t event,
-                            void *user_data)
+static void button_callback(dev_button_handle_t handle, dev_btn_event_t event, void *user_data)
 {
     (void)handle;
     uintptr_t btn_id = (uintptr_t)user_data;
@@ -262,8 +262,10 @@ static void button_callback(dev_button_handle_t handle,
 
     case 2: /* KEY3 - 音量 */
         if (event == DEV_BTN_EVT_SHORT_UP) {
+            s_state.volume = (s_state.volume + 1) % (APP_MUSIC_VOLUME_MAX + 1);
             volume_up();
         } else if (event == DEV_BTN_EVT_LONG_UP || event == DEV_BTN_EVT_VERY_LONG_UP) {
+            s_state.volume = (s_state.volume == 0) ? APP_MUSIC_VOLUME_MAX : s_state.volume - 1;
             volume_down();
         }
         break;
@@ -346,7 +348,7 @@ static void scan_tracks(void)
         }
 
         /* 忽略大小写检查 .mp3 */
-        char ext[8];
+        char   ext[8];
         size_t i;
         for (i = 0; i < sizeof(ext) - 1 && dot[i] != '\0'; i++) {
             char c = dot[i];
@@ -366,8 +368,11 @@ static void scan_tracks(void)
         memcpy(s_tracks[s_track_count].name, entry->d_name, name_len);
         s_tracks[s_track_count].name[name_len] = '\0';
 
-        snprintf(s_tracks[s_track_count].path, sizeof(s_tracks[s_track_count].path),
-                 "%s/%s", SPIFFS_MOUNT_POINT, entry->d_name);
+        snprintf(s_tracks[s_track_count].path,
+                 sizeof(s_tracks[s_track_count].path),
+                 "%s/%s",
+                 SPIFFS_MOUNT_POINT,
+                 entry->d_name);
 
         s_track_count++;
     }
@@ -393,7 +398,7 @@ static void light_sensor_poll(void)
     }
 
     static bool s_was_dark = false;
-    bool is_dark = false;
+    bool        is_dark    = false;
 
     esp_err_t ret = dev_light_sensor_get_ops()->get_status(s_hd->light_sensor, &is_dark);
     if (ret != ESP_OK) {
@@ -401,9 +406,12 @@ static void light_sensor_poll(void)
     }
 
     if (is_dark && !s_was_dark) {
-        /* 变暗 → 关 LED */
-        ESP_LOGD(TAG, "light: dark");
-        led_all_off();
+        /* 变暗 → 自动播放 */
+        ESP_LOGD(TAG, "light: dark, auto play");
+        if (s_hd->audio && !s_state.is_playing) {
+            dev_audio_get_ops()->resume(s_hd->audio);
+            s_state.is_playing = true;
+        }
         s_was_dark = true;
     } else if (!is_dark && s_was_dark) {
         /* 变亮 → 恢复 LED */
@@ -416,21 +424,22 @@ static void light_sensor_poll(void)
  * 创建按键
  * ================================================================ */
 static const gpio_num_t s_btn_gpios[DEV_BUTTON_MAX] = {
-    DEV_PIN_BTN_MODE,    /* ID 0 */
-    DEV_PIN_BTN_TOGGLE,  /* ID 1 */
-    DEV_PIN_BTN_VOLUME,  /* ID 2 */
-    DEV_PIN_BTN_PLAY,    /* ID 3 */
+    DEV_PIN_BTN_MODE,   /* ID 0 */
+    DEV_PIN_BTN_TOGGLE, /* ID 1 */
+    DEV_PIN_BTN_VOLUME, /* ID 2 */
+    DEV_PIN_BTN_PLAY,   /* ID 3 */
 };
 
 static esp_err_t create_buttons(void)
 {
     for (int i = 0; i < DEV_BUTTON_MAX; i++) {
-        esp_err_t ret = dev_init_create_button(
-            s_btn_gpios[i], 0, button_callback, (void *)(uintptr_t)i,
-            &s_hd->buttons[i]);
+        esp_err_t ret = dev_init_create_button(s_btn_gpios[i],
+                                               0,
+                                               button_callback,
+                                               (void *)(uintptr_t)i,
+                                               &s_hd->buttons[i]);
         if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "button GPIO%d create failed: %s",
-                     s_btn_gpios[i], esp_err_to_name(ret));
+            ESP_LOGE(TAG, "button GPIO%d create failed: %s", s_btn_gpios[i], esp_err_to_name(ret));
             return ret;
         }
     }
@@ -463,10 +472,10 @@ esp_err_t app_music_player_init(const dev_handles_t *handles)
     }
 
     /* 3. 初始化状态 */
-    s_state.volume     = APP_MUSIC_VOLUME_DEFAULT;
-    s_state.play_mode  = APP_MUSIC_MODE_SEQUENTIAL;
+    s_state.volume      = APP_MUSIC_VOLUME_DEFAULT;
+    s_state.play_mode   = APP_MUSIC_MODE_SEQUENTIAL;
     s_state.track_total = s_track_count;
-    s_state.is_playing = false;
+    s_state.is_playing  = false;
 
     /* 4. 创建按键 */
     ret = create_buttons();
@@ -493,9 +502,7 @@ void app_music_player_tick(void)
      * 1. 检测音频是否结束 → 自动下一首
      * ============================================================== */
     dev_audio_state_t audio_state;
-    if (s_hd->audio &&
-        dev_audio_get_ops()->get_state(s_hd->audio, &audio_state) == ESP_OK) {
-
+    if (s_hd->audio && dev_audio_get_ops()->get_state(s_hd->audio, &audio_state) == ESP_OK) {
         if (STATE_IS_PLAYING(s_prev_audio_state) && STATE_IS_IDLE(audio_state)) {
             /* 歌曲播放完毕 */
             ESP_LOGI(TAG, "track finished");

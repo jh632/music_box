@@ -54,12 +54,6 @@ typedef struct {
 esp_err_t app_music_player_init(const dev_handles_t *handles);
 
 /**
- * @brief 主循环 tick（每 100ms 调用一次）
- *        处理：播放结束自动切歌、LED 效果、光敏轮询
- */
-void app_music_player_tick(void);
-
-/**
  * @brief 获取当前播放器状态（OLED 显示用）
  */
 const app_music_state_t *app_music_player_get_state(void);
