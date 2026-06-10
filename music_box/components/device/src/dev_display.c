@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -27,6 +28,8 @@ static i2c_master_bus_handle_t s_i2c_bus;
 static i2c_master_dev_handle_t s_oled_dev;
 static bool                    s_oled_inited;
 static uint8_t                 s_oled_buf[OLED_BUF_SIZE];
+
+static void oled_draw_char_no_refresh(uint8_t line, uint8_t column, char ch);
 
 //我这版是 5x7 字模放大到约 10x5，然后放在一个 16 高、8 宽的字符格 里显示。
 /* 5x7 ASCII 字模，按 8x16 字符格显示，未列出的字符显示为空格。 */
@@ -302,6 +305,17 @@ static void oled_draw_smile_mouth(void)
     oled_draw_hline(74, 79, 51, true);
 }
 
+static void oled_draw_text(uint8_t line, uint8_t column, const char *text)
+{
+    if (text == NULL || line < 1 || line > 4 || column < 1 || column > 16) {
+        return;
+    }
+
+    for (uint8_t i = 0; text[i] != '\0' && column + i <= 16; i++) {
+        oled_draw_char_no_refresh(line, column + i, text[i]);
+    }
+}
+
 static void oled_draw_char_no_refresh(uint8_t line, uint8_t column, char ch)
 {
     if (line < 1 || line > 4 || column < 1 || column > 16) {
@@ -386,6 +400,37 @@ void OLED_ShowMusicAnimation(void)
 
     oled_refresh();
     frame_index = (uint8_t)((frame_index + 1) % frame_count);
+}
+
+void OLED_ShowMusicInfo(const char *track_name,
+                        uint8_t track_index,
+                        uint8_t track_total,
+                        uint8_t volume,
+                        bool is_playing,
+                        bool is_auto)
+{
+    char line2[17];
+    char line3[17];
+    char line4[17];
+    const char *mode_text = is_auto ? "AUTO" : "MANUAL";
+    const char *state_text = is_playing ? "PLAY" : "PAUSE";
+
+    memset(s_oled_buf, 0, sizeof(s_oled_buf));
+
+    oled_draw_text(1, 1, track_name);
+    if (track_total == 0) {
+        snprintf(line2, sizeof(line2), "IDX:--/--");
+    } else {
+        snprintf(line2, sizeof(line2), "IDX:%02u/%02u", (unsigned)(track_index + 1), (unsigned)track_total);
+    }
+    snprintf(line3, sizeof(line3), "MODE:%s", mode_text);
+    snprintf(line4, sizeof(line4), "%s VOL:%02u", state_text, (unsigned)volume);
+
+    oled_draw_text(2, 1, line2);
+    oled_draw_text(3, 1, line3);
+    oled_draw_text(4, 1, line4);
+
+    oled_refresh();
 }
 
 static uint32_t oled_pow(uint32_t x, uint32_t y)

@@ -11,10 +11,10 @@ struct dev_light_sensor_s {
     gpio_num_t            do_pin;
 };
 
-/* 普通光敏模块的 DO 一般是低电平表示触发，这里按“低电平=暗”处理 */
+/* 光敏模块的 DO 高电平表示触发 */
 static bool s_is_dark_level(int level)
 {
-    return level == 0;
+    return level == 1;
 }
 
 static esp_err_t dev_light_sensor_init(const dev_light_sensor_config_t *cfg,
