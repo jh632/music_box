@@ -175,23 +175,13 @@ static void play_prev(void)
 /* ================================================================
  * 音量
  * ================================================================ */
-static void volume_up(void)
+static void volume_add(int8_t delta)
 {
-    if (s_state.volume >= APP_MUSIC_VOLUME_MAX) {
+    uint8_t new_vol = s_state.volume + delta;
+    if (new_vol < APP_MUSIC_VOLUME_MIN || new_vol > APP_MUSIC_VOLUME_MAX) {
         return;
     }
-    s_state.volume++;
-    dev_audio_get_ops()->set_volume(s_hd->audio, VOL_INTERNAL(s_state.volume));
-    s_vol_indicate_remain = VOL_INDICATE_TICKS;
-    ESP_LOGI(TAG, "volume: %d", s_state.volume);
-}
-
-static void volume_down(void)
-{
-    if (s_state.volume <= APP_MUSIC_VOLUME_MIN) {
-        return;
-    }
-    s_state.volume--;
+    s_state.volume = new_vol;
     dev_audio_get_ops()->set_volume(s_hd->audio, VOL_INTERNAL(s_state.volume));
     s_vol_indicate_remain = VOL_INDICATE_TICKS;
     ESP_LOGI(TAG, "volume: %d", s_state.volume);
@@ -257,9 +247,9 @@ static void button_callback(dev_button_handle_t handle,
 
     case 2: /* KEY3 - 音量 */
         if (event == DEV_BTN_EVT_SHORT_UP) {
-            volume_up();
+            volume_add(1);
         } else if (event == DEV_BTN_EVT_LONG_UP || event == DEV_BTN_EVT_VERY_LONG_UP) {
-            volume_down();
+            volume_add(-1);
         }
         break;
 
