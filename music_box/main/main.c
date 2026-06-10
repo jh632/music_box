@@ -57,8 +57,7 @@ void app_main(void)
         ESP_LOGE(TAG, "music player init failed: %s", esp_err_to_name(ret));
     }
 
-    /* 打印内存 */
-    displayMemoryUsage();
+   
 
     /* 主循环：驱动播放器 + 内存监控（每 5s 打印一次） */
     uint32_t mem_tick = 0;
